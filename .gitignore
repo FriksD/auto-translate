@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+dist-electron/
+release/
+*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python backend build
+resources/backend/
+resources/bin/
+build/pyinstaller/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Models (downloaded at runtime)
+python/models/
+
+# Audio files (temporary)
+*.m4a
+*.webm
+*.mp3
+*.wav
+
+# Electron
+*.blockmap
+
+# Test
+coverage/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Test downloads
+tmp-download-test/
+
+# Claude AI assistant configuration
+.claude/
