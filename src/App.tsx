@@ -1,6 +1,7 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/layout/Layout'
 import { GlossaryPage } from './pages/GlossaryPage'
+import { MatchesPage } from './pages/MatchesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { TaskPage } from './pages/TaskPage'
 import { TasksPage } from './pages/TasksPage'
@@ -11,6 +12,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<TasksPage />} />
+          <Route path="matches" element={<MatchesPage />} />
           <Route path="tasks/:id" element={<TaskPage />} />
           <Route path="glossary" element={<GlossaryPage />} />
           <Route path="settings" element={<SettingsPage />} />

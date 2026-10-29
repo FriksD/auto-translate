@@ -6,6 +6,7 @@ import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge, Card, ErrorText, Select } from '@/components/ui/form'
 import { ContextEditor } from '@/components/task/ContextEditor'
+import { MatchCard } from '@/components/task/MatchCard'
 import { StageStepper } from '@/components/task/StageStepper'
 import { TaskInfoEditor } from '@/components/task/TaskInfoEditor'
 import { TextEditor } from '@/components/task/TextEditor'
@@ -237,6 +238,8 @@ export function TaskPage() {
         </div>
       </div>
 
+      <MatchCard context={task.context} />
+
       <Card className="space-y-3">
         <StageStepper task={task} stages={stages} />
         {running && progress && (
@@ -249,6 +252,11 @@ export function TaskPage() {
           <p className="flex items-center gap-2 text-sm text-red-700">
             <AlertTriangle className="h-4 w-4" />
             {task.error}
+          </p>
+        )}
+        {task.state === 'reserved' && (
+          <p className="text-sm text-violet-700">
+            已预约。直播自动录制会在后续阶段实现，目前比赛结束后请在「任务信息」里上传采访音频，上传后自动开始处理。
           </p>
         )}
         {task.state === 'draft' && task.source_type === 'file' && !task.source_file && (
@@ -310,7 +318,7 @@ export function TaskPage() {
               }}
               onRefetch={() =>
                 act(async () => {
-                  await api.updateTask(task.id, { context: { ...task.context, teams: [] } })
+                  await api.updateTask(task.id, { context: { ...task.context, teams: [], match: undefined } })
                   await api.runTask(task.id, 'context', 'context')
                 })
               }

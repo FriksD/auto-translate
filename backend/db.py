@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     team1 TEXT,
     team2 TEXT,
     match_hltv_id TEXT,
+    match_time REAL,
     notes TEXT,
     context_json TEXT NOT NULL DEFAULT '{}',
     error TEXT,
@@ -57,9 +58,21 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 """
 
+# 首次启动时写入术语表的常见战队简称 → HLTV 规范名
+DEFAULT_ALIASES = [
+    ("NAVI", "Natus Vincere"), ("Na'Vi", "Natus Vincere"), ("Navi", "Natus Vincere"),
+    ("VP", "Virtus.pro"), ("Mongolz", "The MongolZ"),
+    ("小蜜蜂", "Vitality"), ("天禄", "TYLOO"),
+]
+
+# 旧库升级时补上的列：列名 → 定义
+MIGRATIONS = {
+    "tasks": {"match_time": "REAL"},
+}
+
 TASK_UPDATABLE = {
     "title", "state", "stage", "source_type", "source_url", "source_file",
-    "clip_start", "clip_end", "team1", "team2", "match_hltv_id", "notes",
+    "clip_start", "clip_end", "team1", "team2", "match_hltv_id", "match_time", "notes",
     "context", "error", "cancel_requested",
 }
 
@@ -75,6 +88,16 @@ def init_db() -> None:
     with _lock:
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.executescript(SCHEMA)
+        if _conn.execute("SELECT COUNT(*) FROM glossary").fetchone()[0] == 0:
+            _conn.executemany(
+                "INSERT INTO glossary (kind, term, target, note) VALUES ('alias', ?, ?, '预置')",
+                DEFAULT_ALIASES,
+            )
+        for table, columns in MIGRATIONS.items():
+            existing = {row["name"] for row in _conn.execute(f"PRAGMA table_info({table})")}
+            for column, definition in columns.items():
+                if column not in existing:
+                    _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
         _conn.commit()
 
 
@@ -118,6 +141,15 @@ def list_tasks() -> List[Dict[str, Any]]:
     with _lock:
         rows = _db().execute("SELECT * FROM tasks ORDER BY id DESC").fetchall()
     return [_task_row(r) for r in rows]
+
+
+def find_task_by_match(match_id: int) -> Optional[Dict[str, Any]]:
+    with _lock:
+        row = _db().execute(
+            "SELECT * FROM tasks WHERE match_hltv_id = ? AND state != 'cancelled' ORDER BY id DESC LIMIT 1",
+            (str(match_id),),
+        ).fetchone()
+    return _task_row(row) if row else None
 
 
 def update_task(task_id: int, **fields: Any) -> Dict[str, Any]:

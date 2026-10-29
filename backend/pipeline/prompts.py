@@ -4,7 +4,10 @@
 第一步（clean）：英文清洗——修正 ASR 错误、统一选手名、整理成 Q/A 问答稿。
 第二步（write）：中文成稿——翻译润色为中文电竞媒体风格的 Q：/A： 问答稿。
 """
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
+
+BEIJING = timezone(timedelta(hours=8))
 
 CLEAN_SYSTEM = (
     "You are a senior CS2 esports editor. You clean up raw ASR (Whisper) transcripts of "
@@ -58,24 +61,69 @@ def format_name_table(context: Dict[str, Any], canonical_names: List[str]) -> st
     return "\n".join(lines) if lines else "（无）"
 
 
+def _format_date(unix_ms: Any) -> str:
+    if not unix_ms:
+        return ""
+    return datetime.fromtimestamp(unix_ms / 1000, tz=BEIJING).strftime("%Y-%m-%d %H:%M（北京时间）")
+
+
+def _format_match(match: Dict[str, Any], teams: List[Dict[str, Any]]) -> List[str]:
+    names = [t.get("name", "") for t in teams] + ["", ""]
+    lines = [f"赛事：{match.get('event', '')}；{match.get('format', '')}；{_format_date(match.get('unix_ms'))}"]
+    score = match.get("score") or []
+    if match.get("status") == "over" and len(score) == 2 and None not in score:
+        lines.append(f"最终比分：{names[0]} {score[0]}-{score[1]} {names[1]}")
+    elif match.get("status") == "live":
+        lines.append("比赛状态：进行中")
+    maps = [
+        f"{m['name']} {m['team1_score']}-{m['team2_score']}" + (f"（{m['picked_by']} 选）" if m.get("picked_by") else "")
+        for m in match.get("maps") or [] if m.get("team1_score") is not None
+    ]
+    if maps:
+        lines.append("各图比分（前者为" + names[0] + "）：" + "；".join(maps))
+    if match.get("veto"):
+        lines.append("BP：" + "；".join(match["veto"]))
+    h2h = match.get("head_to_head")
+    if h2h:
+        lines.append(f"历史交手：{names[0]} {h2h['team1_wins']} 胜，{names[1]} {h2h['team2_wins']} 胜")
+    return lines
+
+
+def _format_team(team: Dict[str, Any]) -> List[str]:
+    ranks = []
+    if team.get("hltv_rank"):
+        ranks.append(f"HLTV 排名 #{team['hltv_rank']}")
+    if team.get("vrs_rank"):
+        ranks.append(f"VRS 排名 #{team['vrs_rank']}")
+    lines = [f"- {team['name']}" + (f"（{'，'.join(ranks)}）" if ranks else "")]
+    standins = [f"{p['name']} 替补 {p['standin_for']}" for p in team.get("player_details") or [] if p.get("standin_for")]
+    if standins:
+        lines.append("  替补：" + "；".join(standins))
+    past = team.get("past_matches") or []
+    if past:
+        label = {"won": "胜", "lost": "负", "draw": "平"}
+        lines.append("  近期战绩：" + "；".join(
+            f"{label.get(m['result'], '')} {m['opponent']} {m['score']}" for m in past[:6]
+        ))
+    maps = team.get("map_stats") or []
+    if maps:
+        lines.append("  近 3 个月图池：" + "；".join(
+            f"{m['map']} 胜率 {m['win_pct']}（{m.get('wins')}胜{m.get('losses')}负，选图率 {m.get('pick_pct')}%）"
+            for m in maps[:7]
+        ))
+    news = team.get("news") or []
+    if news:
+        lines.append("  近期新闻：" + "；".join(n["title"] for n in news[:5]))
+    return lines
+
+
 def format_background(context: Dict[str, Any]) -> str:
-    parts = []
-    for team in context.get("teams") or []:
-        if not team.get("name"):
-            continue
-        line = f"- {team['name']}"
-        ranking = team.get("ranking")
-        if ranking and ranking != "N/A":
-            line += f"，世界排名 #{ranking}"
-        parts.append(line)
-        recent = team.get("recent_matches") or []
-        if recent:
-            results = "；".join(
-                f"{m.get('team1')} {m.get('score')} {m.get('team2')}（{m.get('event')}）" for m in recent[:5]
-            )
-            parts.append(f"  近期比赛：{results}")
-    if context.get("match_summary"):
-        parts.append(f"本场比赛：{context['match_summary']}")
+    teams = [t for t in context.get("teams") or [] if t.get("name")]
+    parts: List[str] = []
+    if context.get("match"):
+        parts.extend(_format_match(context["match"], teams))
+    for team in teams:
+        parts.extend(_format_team(team))
     if context.get("background"):
         parts.append(context["background"])
     return "\n".join(parts) if parts else "（无）"

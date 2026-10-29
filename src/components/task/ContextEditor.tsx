@@ -12,6 +12,49 @@ const splitNames = (text: string) =>
     .map((s) => s.trim())
     .filter(Boolean)
 
+const RESULT_LABELS = { won: '胜', lost: '负', draw: '平' }
+
+function TeamFacts({ team }: { team: TeamContext }) {
+  const ranks = [team.hltv_rank && `HLTV #${team.hltv_rank}`, team.vrs_rank && `VRS #${team.vrs_rank}`].filter(Boolean)
+  const standins = (team.player_details ?? []).filter((p) => p.standin_for)
+  return (
+    <div className="space-y-1 text-xs text-muted-foreground">
+      {ranks.length > 0 && <p>排名：{ranks.join('，')}</p>}
+      {team.coach_full && <p>教练：{team.coach_full}</p>}
+      {standins.length > 0 && <p>替补：{standins.map((p) => `${p.name} 替补 ${p.standin_for}`).join('；')}</p>}
+      {team.past_matches && team.past_matches.length > 0 && (
+        <p>
+          近期战绩：
+          {team.past_matches
+            .slice(0, 6)
+            .map((m) => `${RESULT_LABELS[m.result] ?? ''} ${m.opponent} ${m.score}`)
+            .join('；')}
+        </p>
+      )}
+      {team.map_stats && team.map_stats.length > 0 && (
+        <p>
+          近 3 个月图池：
+          {team.map_stats.map((m) => `${m.map} ${m.win_pct}（${m.wins}胜${m.losses}负）`).join('；')}
+        </p>
+      )}
+      {team.news && team.news.length > 0 && (
+        <div>
+          近期新闻：
+          <ul className="ml-4 list-disc">
+            {team.news.map((n) => (
+              <li key={n.url}>
+                <a href={n.url} target="_blank" rel="noreferrer" className="hover:text-foreground hover:underline">
+                  {n.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface TeamDraft {
   original: TeamContext
   name: string
@@ -117,14 +160,7 @@ export function ContextEditor({ context, disabled, onSave, onRefetch }: Props) {
           <Field label="阵容" hint="逗号分隔">
             <Input value={team.players} disabled={disabled} onChange={(e) => updateTeam(index, { players: e.target.value })} />
           </Field>
-          {team.original.recent_matches && team.original.recent_matches.length > 0 && (
-            <div className="text-xs text-muted-foreground">
-              近期比赛：
-              {team.original.recent_matches
-                .map((m) => `${m.team1} ${m.score} ${m.team2}（${m.event}）`)
-                .join('；')}
-            </div>
-          )}
+          <TeamFacts team={team.original} />
         </div>
       ))}
 
@@ -151,7 +187,7 @@ export function ContextEditor({ context, disabled, onSave, onRefetch }: Props) {
           保存
         </Button>
         <Button size="sm" variant="outline" disabled={disabled} onClick={onRefetch}>
-          清空并从 HLTV 重新抓取
+          从 HLTV 重新抓取
         </Button>
       </div>
     </div>

@@ -228,5 +228,8 @@ def collect_canonical_names(context: Dict) -> List[str]:
         if coach:
             names.append(coach)
     names.extend(n for n in context.get("extra_names") or [] if n)
+    # 近期交手的对手队名也按 HLTV 写法规范（采访里常提到上一轮的对手）
+    for team in context.get("teams") or []:
+        names.extend(m["opponent"] for m in team.get("past_matches") or [] if m.get("opponent"))
     seen: Set[str] = set()
     return [n.strip() for n in names if n.strip() and not (n.strip() in seen or seen.add(n.strip()))]

@@ -71,7 +71,10 @@ export function TaskInfoEditor({ task, disabled, onSave, onUpload }: Props) {
           <Input value={form.source_url} disabled={disabled} onChange={(e) => set('source_url')(e.target.value)} />
         </Field>
       ) : (
-        <Field label="重新上传文件" hint="上传后会自动从头开始处理">
+        <Field
+          label={task.source_type === 'live' ? '上传采访音频' : '重新上传文件'}
+          hint="上传后会自动开始处理（已抓取的背景信息会保留）"
+        >
           <Input
             type="file"
             accept="audio/*,video/*"

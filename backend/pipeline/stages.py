@@ -24,7 +24,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from .. import config, db, llm
 from ..integrations.feishu import FeishuClient
 from ..runner import PipelineRunner
-from ..sources.hltv import HLTVScraper
+from ..sources.browser import BrowserFetcher
+from ..sources.hltv import HLTVClient
+from . import context as context_builder
 from . import prompts
 from .docx_export import export_docx
 from .names import NameNormalizer, collect_canonical_names, replace_tokens, token_contexts
@@ -33,7 +35,8 @@ logger = logging.getLogger(__name__)
 
 TEXT_ARTIFACTS = ("clean_en.txt", "draft_raw_zh.txt", "draft_zh.txt")
 
-hltv = HLTVScraper()
+browser = BrowserFetcher(config.DATA_DIR / "browser-profile")
+hltv = HLTVClient(browser)
 _whisper = None
 _diarizer = None
 _model_lock = threading.Lock()
@@ -82,29 +85,36 @@ async def stage_context(task_id: int) -> None:
     task = _task(task_id)
     context = dict(task["context"])
     if context.get("teams"):
-        db.add_event(task_id, "已有背景信息，跳过抓取（如需刷新请清空后重跑）", stage="context")
-        return
-    team_names = [t for t in (task["team1"], task["team2"]) if t]
-    if not team_names:
-        db.add_event(task_id, "未填写队伍，跳过抓取；可在背景信息里手动补充选手名", level="warning", stage="context")
+        db.add_event(task_id, "已有背景信息，跳过抓取（如需刷新请在背景信息页重新抓取）", stage="context")
         return
 
-    teams = []
-    for name in team_names:
-        set_progress(task_id, None, f"正在抓取 {name} 的信息...")
-        info = await hltv.get_team_info(name)
-        if info.get("error"):
-            db.add_event(task_id, f"抓取 {name} 失败：{info['error']}", level="warning", stage="context")
-            teams.append({"name": name, "players": [], "error": info["error"]})
-            continue
-        info["recent_matches"] = await hltv.get_recent_matches(info["name"], limit=5)
-        db.add_event(
-            task_id, f"已获取 {info['name']}：阵容 {', '.join(info.get('players') or []) or '（空）'}",
-            stage="context",
-        )
-        teams.append(info)
-    context["teams"] = teams
-    db.update_task(task_id, context=context)
+    if task["match_hltv_id"]:
+        set_progress(task_id, None, "正在从 HLTV 抓取比赛信息...")
+        built, warnings = await context_builder.build_from_match(hltv, int(task["match_hltv_id"]))
+    else:
+        names = [t for t in (task["team1"], task["team2"]) if t]
+        if not names:
+            db.add_event(task_id, "未关联比赛也未填写队伍，跳过抓取；可在背景信息里手动补充选手名",
+                         level="warning", stage="context")
+            return
+        set_progress(task_id, None, f"正在从 HLTV 抓取 {' / '.join(names)} 的信息...")
+        built, warnings = await context_builder.build_from_team_names(hltv, names)
+
+    for warning in warnings:
+        db.add_event(task_id, warning, level="warning", stage="context")
+    context.update(built)
+    updates: Dict[str, Any] = {"context": context}
+    match = built.get("match")
+    if match:
+        teams = built["teams"]
+        if len(teams) == 2:
+            updates.update(team1=teams[0]["name"], team2=teams[1]["name"])
+        if match.get("unix_ms"):
+            updates["match_time"] = match["unix_ms"] / 1000
+    db.update_task(task_id, **updates)
+    for team in built["teams"]:
+        if team.get("players"):
+            db.add_event(task_id, f"{team['name']}：{', '.join(team['players'])}", stage="context")
 
 
 # ── ingest ────────────────────────────────────────────────────────────────────
@@ -146,6 +156,8 @@ def _download(task_id: int, url: str, settings: Dict[str, Any]) -> Path:
 def stage_ingest(task_id: int) -> None:
     task = _task(task_id)
     settings = db.get_settings()
+    if task["source_type"] == "live":
+        raise RuntimeError("直播录制将在第四阶段实现，目前请在「任务信息」里上传采访音频")
     if task["source_type"] == "url":
         if not task["source_url"]:
             raise RuntimeError("未填写视频链接")

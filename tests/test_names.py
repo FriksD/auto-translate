@@ -89,6 +89,13 @@ class CollectCanonicalNamesTest(unittest.TestCase):
             ["Falcons", "m0NESY", "NiKo", "zonic", "Vitality", "ZywOo", "Hugo"],
         )
 
+    def test_includes_recent_opponents(self):
+        context = {"teams": [{"name": "Falcons", "players": [], "past_matches": [{"opponent": "Natus Vincere"}]}]}
+        self.assertEqual(collect_canonical_names(context), ["Falcons", "Natus Vincere"])
+        normalizer = NameNormalizer(collect_canonical_names(context), aliases={"NAVI": "Natus Vincere"})
+        self.assertEqual(normalizer.normalize("击败 NAVI 之后")[0], "击败 Natus Vincere 之后")
+        self.assertEqual(normalizer.normalize("击败 Na'Vi 之后")[0], "击败 Natus Vincere 之后")
+
 
 if __name__ == "__main__":
     unittest.main()

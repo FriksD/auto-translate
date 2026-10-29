@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge, Card, CardTitle, ErrorText, Field, Select } from '@/components/ui/form'
-import { api, formatTime, isRunning, parseSeconds, STATE_COLORS, STATE_LABELS, Task } from '@/lib/api'
+import { api, formatMatchTime, formatTime, isRunning, parseSeconds, STATE_COLORS, STATE_LABELS, Task } from '@/lib/api'
 
 function NewTaskForm({ onCreated }: { onCreated: (task: Task) => void }) {
   const [title, setTitle] = useState('')
+  const [matchUrl, setMatchUrl] = useState('')
   const [sourceType, setSourceType] = useState<'url' | 'file'>('url')
   const [url, setUrl] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -38,6 +39,7 @@ function NewTaskForm({ onCreated }: { onCreated: (task: Task) => void }) {
         clip_start: parseSeconds(clipStart),
         clip_end: parseSeconds(clipEnd),
         notes: notes.trim() || null,
+        match_url: matchUrl.trim() || null,
       })
       if (sourceType === 'file' && file) {
         await api.uploadSource(task.id, file)
@@ -65,6 +67,10 @@ function NewTaskForm({ onCreated }: { onCreated: (task: Task) => void }) {
             <Input value={team2} onChange={(e) => setTeam2(e.target.value)} placeholder="Vitality" />
           </Field>
         </div>
+
+        <Field label="HLTV 比赛链接" hint="可选。填了会按这场比赛抓取当时的阵容、比分、BP 等，队伍可以不填">
+          <Input value={matchUrl} onChange={(e) => setMatchUrl(e.target.value)} placeholder="https://www.hltv.org/matches/2381773/..." />
+        </Field>
 
         <div className="grid gap-4 md:grid-cols-[160px_1fr]">
           <Field label="音频来源">
@@ -149,6 +155,7 @@ export function TasksPage() {
                 <th className="px-5 py-3 font-medium">#</th>
                 <th className="px-5 py-3 font-medium">标题</th>
                 <th className="px-5 py-3 font-medium">状态</th>
+                <th className="px-5 py-3 font-medium">比赛时间</th>
                 <th className="px-5 py-3 font-medium">进度</th>
                 <th className="px-5 py-3 font-medium">创建时间</th>
               </tr>
@@ -166,6 +173,9 @@ export function TasksPage() {
                     <Badge className={STATE_COLORS[task.state] ?? 'bg-slate-100'}>
                       {STATE_LABELS[task.state] ?? task.state}
                     </Badge>
+                  </td>
+                  <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">
+                    {task.match_time ? formatMatchTime(task.match_time * 1000) : ''}
                   </td>
                   <td className="max-w-xs truncate px-5 py-3 text-muted-foreground">
                     {isRunning(task.state) ? task.progress?.message : task.state === 'failed' ? task.error : ''}

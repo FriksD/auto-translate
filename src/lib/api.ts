@@ -11,22 +11,83 @@ export interface TaskProgress {
   updated_at: number
 }
 
+export interface PastMatch {
+  opponent: string
+  score: string
+  result: 'won' | 'lost' | 'draw'
+  format: string
+  when: string
+  url: string
+}
+
+export interface MapStat {
+  map: string
+  win_pct: string
+  pickban: string
+  pick_pct: number | null
+  ban_pct: number | null
+  wins: number | null
+  losses: number | null
+}
+
 export interface TeamContext {
+  id?: number | null
   name: string
   players?: string[]
-  player_details?: { name: string; real_name?: string; nationality?: string }[]
-  stats?: { coach?: string | null; world_ranking?: string | null }
+  player_details?: { name: string; real_name?: string; nationality?: string; standin_for?: string }[]
+  stats?: { coach?: string | null }
   coach?: string
-  ranking?: string
-  recent_matches?: { team1: string; team2: string; score: string; event: string }[]
+  coach_full?: string
+  hltv_rank?: number | null
+  vrs_rank?: number | null
+  past_matches?: PastMatch[]
+  map_stats?: MapStat[]
+  news?: { title: string; url: string; unix_ms: number | null }[]
   error?: string
 }
 
+export interface Stream {
+  provider: string
+  name: string
+  country: string
+  viewers: number | null
+  url: string
+}
+
+export interface MatchContext {
+  id: number
+  url: string
+  event: string
+  format: string
+  unix_ms: number | null
+  status: 'upcoming' | 'live' | 'over'
+  score: (number | null)[]
+  veto: string[]
+  maps: { name: string; team1_score: number | null; team2_score: number | null; picked_by: string | null }[]
+  head_to_head: { team1_wins: number; overtimes: number; team2_wins: number } | null
+  streams: Stream[]
+}
+
 export interface TaskContext {
+  match?: MatchContext
   teams?: TeamContext[]
   extra_names?: string[]
   background?: string
-  match_summary?: string
+}
+
+export interface HltvMatch {
+  id: number
+  url: string
+  unix_ms: number | null
+  live: boolean
+  lan: boolean
+  stars: number
+  team1: { id: number | null; name: string }
+  team2: { id: number | null; name: string }
+  event: { id: number | null; name: string }
+  format: string
+  stage: string
+  task_id: number | null
 }
 
 export interface Task {
@@ -34,13 +95,15 @@ export interface Task {
   title: string
   state: string
   stage: string | null
-  source_type: 'url' | 'file'
+  source_type: 'url' | 'file' | 'live'
   source_url: string | null
   source_file: string | null
   clip_start: number | null
   clip_end: number | null
   team1: string | null
   team2: string | null
+  match_hltv_id: string | null
+  match_time: number | null
   notes: string | null
   context: TaskContext
   error: string | null
@@ -98,6 +161,7 @@ export interface LlmStep {
 export interface Settings {
   proxy: string
   ffmpeg_path: string
+  hltv: { headless: boolean }
   whisper: { model: string; device: string; compute_type: string; language: string; beam_size: number }
   diarization: { enabled: boolean; model_path: string; hf_token: string }
   llm: {
@@ -151,7 +215,8 @@ export const api = {
 
   listTasks: () => request<Task[]>('GET', '/api/tasks'),
   getTask: (id: number) => request<TaskDetail>('GET', `/api/tasks/${id}`),
-  createTask: (body: Partial<Task> & { start?: boolean }) => request<Task>('POST', '/api/tasks', body),
+  createTask: (body: Partial<Task> & { start?: boolean; match_url?: string | null }) =>
+    request<Task>('POST', '/api/tasks', body),
   updateTask: (id: number, body: Partial<Task>) => request<Task>('PATCH', `/api/tasks/${id}`, body),
   deleteTask: (id: number) => request<{ ok: boolean }>('DELETE', `/api/tasks/${id}`),
   uploadSource: (id: number, file: File) => {
@@ -166,6 +231,10 @@ export const api = {
   saveText: (id: number, name: string, text: string) =>
     request<{ ok: boolean }>('PUT', `/api/tasks/${id}/texts/${name}`, { text }),
   fileUrl: (id: number, name: string) => `/api/tasks/${id}/files/${encodeURIComponent(name)}`,
+
+  listMatches: (refresh = false) =>
+    request<{ fetched_at: number | null; matches: HltvMatch[] }>('GET', `/api/matches?refresh=${refresh}`),
+  reserveMatch: (id: number) => request<Task>('POST', `/api/matches/${id}/reserve`, {}),
 
   getSettings: () => request<Settings>('GET', '/api/settings'),
   saveSettings: (settings: Settings) => request<Settings>('PUT', '/api/settings', settings),
@@ -197,6 +266,7 @@ export const STATE_COLORS: Record<string, string> = {
   queued: 'bg-blue-50 text-blue-700',
   processing: 'bg-blue-100 text-blue-800',
   review: 'bg-amber-100 text-amber-800',
+  reserved: 'bg-violet-100 text-violet-800',
   done: 'bg-emerald-100 text-emerald-800',
   failed: 'bg-red-100 text-red-700',
   cancelled: 'bg-slate-100 text-slate-500',
@@ -208,6 +278,18 @@ export function isRunning(state: string) {
 
 export function formatTime(ts: number) {
   return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false })
+}
+
+export function formatMatchTime(unixMs: number | null | undefined) {
+  if (!unixMs) return ''
+  return new Date(unixMs).toLocaleString('zh-CN', {
+    hour12: false,
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 export function formatSeconds(seconds: number | null | undefined) {

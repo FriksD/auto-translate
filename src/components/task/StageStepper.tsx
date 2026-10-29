@@ -21,7 +21,9 @@ export function StageStepper({ task, stages }: { task: TaskDetail; stages: Stage
     <ol className="flex flex-wrap items-center gap-2">
       {stages.map((stage, index) => {
         let status: StageStatus = 'pending'
-        if (finished || (currentIndex >= 0 && index < currentIndex)) status = 'done'
+        // 已预约的任务只跑过「抓取背景信息」
+        const contextReady = stage.key === 'context' && !task.stage && (task.context.teams?.length ?? 0) > 0
+        if (finished || contextReady || (currentIndex >= 0 && index < currentIndex)) status = 'done'
         else if (index === currentIndex && (task.state === 'processing' || task.state === 'queued')) status = 'active'
         else if (index === currentIndex && task.state === 'failed') status = 'failed'
         const Icon = ICONS[status]

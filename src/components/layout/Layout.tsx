@@ -1,9 +1,10 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { BookText, ListChecks, Settings } from 'lucide-react'
+import { BookText, CalendarDays, ListChecks, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV = [
   { to: '/', label: '任务', icon: ListChecks, end: true },
+  { to: '/matches', label: '比赛', icon: CalendarDays, end: false },
   { to: '/glossary', label: '术语表', icon: BookText, end: false },
   { to: '/settings', label: '设置', icon: Settings, end: false },
 ]

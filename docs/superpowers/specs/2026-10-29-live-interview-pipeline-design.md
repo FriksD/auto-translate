@@ -1,7 +1,7 @@
 # CS2 赛后采访全自动翻译流水线 — 设计文档
 
 日期：2026-10-29
-状态：第一阶段已实现
+状态：第一、二阶段已实现
 
 ## 1. 目标
 
@@ -66,45 +66,50 @@ RESERVED ──(开赛前)──▶ WATCHING ──(决胜图接近结束)──
 
 ## 4. 模块设计
 
-### 4.1 HLTV 浏览器层（解决 Cloudflare）
+### 4.1 HLTV 浏览器层（解决 Cloudflare）——已实现
 
-现状：`python/services/hltv_scraper.py` 用 curl-cffi 伪造 TLS 指纹，挂代理时高概率被 Cloudflare 拦截。
+旧版用 curl-cffi 伪造 TLS 指纹，挂代理时高概率被 Cloudflare 拦截。
 
 **决定：用 Playwright 驱动真实 Chrome，不用 LLM Agent。**
 Cloudflare 拦截看的是浏览器指纹和行为，不是"会不会看网页"。LLM Agent 解决不了指纹问题，还会带来延迟、费用和不确定性。确定性的浏览器自动化加人工兜底就够了。
 
-- 使用 `playwright` + 本机安装的 Chrome（`channel="chrome"`），**有头模式**，**持久化用户目录**（`data/browser-profile/`），通过代理启动。`cf_clearance` 等 cookie 会持久保存，过一次验证之后长时间有效。
-- 全局只维护一个浏览器上下文，所有 HLTV 访问串行排队，间隔加随机抖动，避免高频触发。
-- 检测到 challenge 页面时：先等待 15 秒（多数 JS challenge 会自动通过）；仍未通过就发飞书通知"HLTV 需要人工验证"。人在本机打开的浏览器窗口里点一下即可，之后流程自动继续。
-- 页面解析沿用现有 BeautifulSoup 逻辑：从 `page.content()` 拿 HTML，复用 `hltv_scraper.py` 中已有的解析函数，只替换 `_get` 的实现。
-- **备用数据源**：Liquipedia（MediaWiki API）提供队伍阵容、选手资料，HLTV 失败时降级使用。
+实现（`backend/sources/browser.py`）：
+- `playwright` + 本机 Chrome（`channel="chrome"`），默认**有头模式**，**持久化用户目录**（`data/browser-profile/`），通过代理启动。`cf_clearance` 等 cookie 持久保存。
+- 所有浏览器操作在一个专用线程中串行执行，两次访问至少间隔 3 秒加随机抖动。空闲 10 分钟自动关闭浏览器。
+- 遇到验证页先自动等待 20 秒；仍未通过就发飞书通知"HLTV 需要人工验证"，在弹出的 Chrome 窗口里点一下即可，最多再等 5 分钟。
+- 解析是纯函数（`backend/sources/hltv_parse.py`），测试样本裁剪自真实页面（`tests/fixtures/hltv/`）。HLTV 改版时先看这里。
 
-对外接口（`HLTVClient`）：
-- `list_matches(days=5)`：比赛列表（id、时间、双方、赛事、BO 数、直播链接）
-- `get_match(match_id)`：比赛详情（状态、每张图比分、地图、直播流列表）
-- `get_team / get_player / get_recent_matches / get_news(team)`：背景信息
+实测（2026-10）：`/matches`、比赛页、战队页、搜索页都能直接通过；`/stats/...` 统计页的验证更严，需要人工点击。因此**图池数据改从战队页的「Map win statistics past 3 months」读取**，不访问统计页。
 
-### 4.2 比赛列表与预约
+对外接口（`HLTVClient`，带内存缓存）：
+- `list_matches()`：比赛列表（id、时间、星级、双方、赛事、阶段、BO 数、是否进行中）
+- `get_match(id)`：比赛页（当时的阵容含真名/国籍/替补、排名、BP、各图比分、双方近期战绩、交手记录、直播源）
+- `get_team(id)`：战队页（教练、当前阵容、排名、近 3 个月图池、最近 5 场、相关新闻）
+- `search_team(name)`：按队名找战队 ID（手动任务未关联比赛时使用）
 
-- 每 30 分钟刷新一次未来 5 天的比赛列表，缓存到 `matches` 表。Web UI 展示，按日期和赛事分组。
-- 人工点击"预约"即创建 Task，可同时填写或覆盖：
-  - 直播流 URL：默认取 HLTV 比赛页上的英文官方流，可手动改（Twitch/YouTube 均可）。
-  - 备注、交稿要求（可选，会传给 LLM）。
-- 预约后立即异步抓取背景信息（见 4.3），开赛前 30 分钟再刷新一次阵容。
-- 赛程延期时，监视器以 HLTV 实际状态为准，不依赖预约时刻。
+Liquipedia 备用数据源暂未实现：实测 HLTV 浏览器层足够稳定，确有需要时再加。
 
-### 4.3 背景信息抓取与知识库
+### 4.2 比赛列表与预约——已实现
 
-预约时抓取，结果写入 `task.context`（JSON），同时沉淀到实体缓存表：
+- Web UI「比赛」页显示 HLTV 未来 5 天的比赛，按日期分组，可按队名/赛事搜索、按星级筛选。列表缓存 10 分钟，可手动刷新。
+- 点「预约」创建 Task（状态 RESERVED，标题自动生成），立即抓取背景信息（只跑 `context` 阶段，完成后回到 RESERVED）。
+- 手动任务也可以填 HLTV 比赛链接，按这场比赛抓取背景信息。
+- 第三、四阶段完成前，预约的任务在比赛结束后由人工上传采访音频，上传后自动走完后处理。
+
+### 4.3 背景信息抓取与知识库——已实现
+
+以**比赛页**为主，**战队页**补充：
 
 | 内容 | 来源 | 用途 |
 |---|---|---|
-| 双方队伍、阵容、教练 | HLTV 队伍页 / Liquipedia | ASR 提示词、LLM 纠错、稿件背景 |
-| 选手 ID、真名、国籍、角色 | HLTV 选手页 / Liquipedia | 同上 |
-| 近期战绩、交手记录 | HLTV | 稿件背景 |
-| 图池（近 3 个月胜率、选图/禁图） | HLTV 队伍统计页 | 稿件背景 |
-| 相关新闻（近 7 天） | HLTV 新闻列表按队名过滤 | 稿件背景 |
-| 本场比分（赛后补抓） | HLTV 比赛页 | 稿件背景 |
+| 比赛当时的阵容、真名、国籍、替补 | 比赛页 | ASR 提示词、LLM 名单、名词规范化 |
+| 赛事、阶段、BO、时间、BP、各图比分、交手记录 | 比赛页 | 稿件背景 |
+| 双方近期战绩（含对手队名） | 比赛页 | 稿件背景；对手队名也加入规范名单 |
+| 教练（含全名） | 战队页 | 规范名单 |
+| 图池（近 3 个月胜率、选图/禁图率） | 战队页 | 稿件背景 |
+| 相关新闻标题（近 14 天） | 战队页 | 稿件背景 |
+
+战队页是"当前"数据：只有比赛发生在最近 30 天内才使用；更早的比赛只用比赛页（阵容以比赛当时为准），并在日志中提示。
 
 每个字段独立抓取、独立失败。失败字段在 UI 和飞书卡片中标红，可人工补填，不阻塞主流程。
 
@@ -229,7 +234,10 @@ backend/
   db.py                  # SQLite：任务、事件、术语表、设置
   runner.py              # 任务状态机与流水线执行器
   llm.py                 # 自定义 LLM 供应商调用（OpenAI / Anthropic 兼容）
-  sources/hltv.py        # HLTV 抓取（第二阶段换成浏览器层）
+  sources/browser.py     # Playwright 驱动的 Chrome，处理 Cloudflare
+  sources/hltv.py        # HLTV 客户端（缓存）
+  sources/hltv_parse.py  # HLTV 页面解析
+  pipeline/context.py    # 从 HLTV 组装任务背景信息
   pipeline/stages.py     # 后处理各阶段实现
   pipeline/whisper.py    # faster-whisper 封装
   pipeline/diarization.py
@@ -237,7 +245,7 @@ backend/
   pipeline/names.py      # 专有名词规范化
   pipeline/docx_export.py
   integrations/feishu.py
-  # 后续阶段新增：sources/liquipedia.py、pipeline/watcher.py、recorder.py、segmenter.py
+  # 后续阶段新增：pipeline/watcher.py、recorder.py、segmenter.py
 src/                     # React 前端（npm run build 输出到 dist/，由后端托管）
 data/                    # 运行时数据（gitignore）
 models/                  # 本地 Whisper 模型（gitignore）
@@ -247,8 +255,8 @@ models/                  # 本地 Whisper 模型（gitignore）
 
 按"先打通后处理，再做前置自动化"的顺序推进，每个阶段都能独立使用：
 
-1. **骨架 + 后处理链路**：新目录结构、SQLite、状态机、FastAPI 托管前端；手动上传音频或输入 URL → 转录 → 两段式 LLM → 名词规范化 → Word → 飞书发送。可以用历史采访录像离线测试。
-2. **HLTV 浏览器层 + 比赛列表 + 预约 + 背景信息抓取**，以及术语表和知识库。
+1. ✅ **骨架 + 后处理链路**：新目录结构、SQLite、状态机、FastAPI 托管前端；手动上传音频或输入 URL → 转录 → 两段式 LLM → 名词规范化 → Word → 飞书发送。可以用历史采访录像离线测试。
+2. ✅ **HLTV 浏览器层 + 比赛列表 + 预约 + 背景信息抓取**，以及术语表（预置常见战队简称）。
 3. **比赛监视器 + 飞书通知**（含比赛结束通知、卡片交互）。
 4. **直播录音 + 滚动转录 + 采访定位**：自动化程度最高、最需要实战调参的部分，要在真实比赛中迭代。
 5. 打磨：UI 细节、diff 存档、prompt 迭代。

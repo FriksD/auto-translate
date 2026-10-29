@@ -59,7 +59,7 @@ export function SettingsPage() {
     return error ? <ErrorText>{error}</ErrorText> : <Loader2 className="mx-auto mt-20 h-6 w-6 animate-spin" />
   }
 
-  type Section = 'whisper' | 'diarization' | 'llm' | 'feishu'
+  type Section = 'hltv' | 'whisper' | 'diarization' | 'llm' | 'feishu'
   const patch = <K extends Section>(key: K, value: Partial<Settings[K]>) =>
     setSettings({ ...settings, [key]: { ...settings[key], ...value } })
 
@@ -100,6 +100,16 @@ export function SettingsPage() {
           <Field label="ffmpeg 路径" hint="留空自动查找 PATH">
             <Input value={settings.ffmpeg_path} onChange={(e) => setSettings({ ...settings, ffmpeg_path: e.target.value })} />
           </Field>
+        </div>
+        <div className="mt-4 space-y-1">
+          <Checkbox
+            checked={settings.hltv.headless}
+            onChange={(headless) => patch('hltv', { headless })}
+            label="HLTV 浏览器使用无头模式"
+          />
+          <p className="text-xs text-muted-foreground">
+            默认会弹出一个 Chrome 窗口访问 HLTV（空闲 10 分钟自动关闭）。遇到需要人工点击的 Cloudflare 验证时会发飞书提醒，在该窗口里点一下即可；无头模式下无法人工验证。
+          </p>
         </div>
       </Card>
 

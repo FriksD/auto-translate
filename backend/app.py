@@ -6,6 +6,7 @@
 import json
 import logging
 import shutil
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,6 +21,7 @@ from . import config, db, llm
 from .integrations import feishu
 from .pipeline import stages
 from .runner import STAGES, STAGE_KEYS, PipelineRunner, State
+from .sources import hltv_parse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -32,18 +34,29 @@ async def _notify_failure(task_id: int, message: str) -> None:
     await run_in_threadpool(feishu.notify, db.get_settings(), f"【处理失败】{task['title']}\n{message}")
 
 
+def _configure_browser(settings: Dict[str, Any]) -> None:
+    stages.browser.configure(config.proxy_or_none(settings), bool(settings["hltv"].get("headless")))
+
+
+def _on_hltv_challenge(url: str) -> None:
+    feishu.notify(
+        db.get_settings(),
+        f"【HLTV 需要人工验证】请在本机弹出的 Chrome 窗口中完成 Cloudflare 验证\n{url}",
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init_db()
-    settings = db.get_settings()
-    await stages.hltv.initialize(config.proxy_or_none(settings))
+    _configure_browser(db.get_settings())
+    stages.browser.on_challenge = _on_hltv_challenge
     stages.register(runner)
     runner.on_failure(_notify_failure)
     runner.start()
     logger.info("服务已启动，数据目录：%s", config.DATA_DIR)
     yield
     await runner.stop()
-    await stages.hltv.close()
+    await stages.browser.close()
 
 
 app = FastAPI(title="Auto-Translate-to-News", lifespan=lifespan)
@@ -77,10 +90,8 @@ async def get_settings():
 
 @app.put("/api/settings")
 async def put_settings(settings: Dict[str, Any]):
-    old_proxy = config.proxy_or_none(db.get_settings())
     saved = db.save_settings(settings)
-    if config.proxy_or_none(saved) != old_proxy:
-        await stages.hltv.initialize(config.proxy_or_none(saved))
+    _configure_browser(saved)
     return saved
 
 
@@ -145,6 +156,7 @@ async def delete_glossary(entry_id: int):
 class TaskCreate(BaseModel):
     title: str
     source_type: str = "url"  # url | file
+    match_url: Optional[str] = None
     source_url: Optional[str] = None
     team1: Optional[str] = None
     team2: Optional[str] = None
@@ -196,7 +208,12 @@ async def create_task(body: TaskCreate):
         raise HTTPException(400, "source_type 只能是 url 或 file")
     if body.source_type == "url" and not (body.source_url or "").strip():
         raise HTTPException(400, "请填写视频链接")
-    fields = body.model_dump(exclude={"start"})
+    fields = body.model_dump(exclude={"start", "match_url"})
+    if body.match_url:
+        match_id = hltv_parse.match_id_from_url(body.match_url)
+        if not match_id:
+            raise HTTPException(400, "无法从链接中识别 HLTV 比赛 ID")
+        fields["match_hltv_id"] = str(match_id)
     task = db.create_task(state=State.DRAFT, **fields)
     db.add_event(task["id"], "任务已创建")
     # 文件任务等上传完成后再开始
@@ -308,6 +325,58 @@ async def download_file(task_id: int, name: str):
     if path.parent != config.task_dir(task_id).resolve() or not path.is_file():
         raise HTTPException(404, "文件不存在")
     return FileResponse(path, filename=path.name)
+
+
+# ── HLTV 比赛 ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/matches")
+async def list_matches(refresh: bool = False, days: int = 5):
+    try:
+        matches = await stages.hltv.list_matches(refresh=refresh)
+    except Exception as error:
+        raise HTTPException(502, f"抓取 HLTV 比赛列表失败：{error}")
+    horizon = (time.time() + days * 86400) * 1000
+    result = []
+    for match in matches:
+        if match["unix_ms"] and match["unix_ms"] > horizon:
+            continue
+        task = db.find_task_by_match(match["id"])
+        result.append({**match, "task_id": task["id"] if task else None})
+    return {"fetched_at": stages.hltv.cached_at("matches"), "matches": result}
+
+
+class ReserveRequest(BaseModel):
+    title: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@app.post("/api/matches/{match_id}/reserve")
+async def reserve_match(match_id: int, body: ReserveRequest):
+    existing = db.find_task_by_match(match_id)
+    if existing:
+        raise HTTPException(409, f"这场比赛已经预约过（任务 #{existing['id']}）")
+    listed = next((m for m in (await stages.hltv.list_matches()) if m["id"] == match_id), None)
+    title = body.title
+    if not title:
+        if listed:
+            teams = " vs ".join(t["name"] or "TBD" for t in (listed["team1"], listed["team2"]))
+            title = f"{teams} · {listed['event']['name']}" if listed["event"]["name"] else teams
+        else:
+            title = f"HLTV 比赛 {match_id}"
+    task = db.create_task(
+        title=title,
+        state=State.RESERVED,
+        source_type="live",
+        match_hltv_id=str(match_id),
+        match_time=(listed["unix_ms"] / 1000) if listed and listed["unix_ms"] else None,
+        team1=(listed["team1"]["name"] or None) if listed else None,
+        team2=(listed["team2"]["name"] or None) if listed else None,
+        notes=body.notes,
+    )
+    db.add_event(task["id"], "已预约比赛")
+    # 立即抓取背景信息；只跑这一阶段，完成后回到「已预约」
+    runner.enqueue(task["id"], "context", "context")
+    return db.get_task(task["id"])
 
 
 # ── 前端静态资源（npm run build 后生成 dist/） ─────────────────────────────────

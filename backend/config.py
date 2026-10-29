@@ -28,6 +28,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # HLTV、拉流、LLM 统一使用的代理；留空表示直连
     "proxy": "http://127.0.0.1:7897",
     "ffmpeg_path": "",
+    "hltv": {
+        # 有头模式才能在 Cloudflare 需要人工验证时手动点击；无头模式更安静但更容易被拦
+        "headless": False,
+    },
     "whisper": {
         "model": _default_whisper_model(),
         "device": "cuda",
