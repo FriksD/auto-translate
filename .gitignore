@@ -34,10 +34,8 @@ Thumbs.db
 .env.local
 .env.*.local
 
-# Python backend build
-resources/backend/
-resources/bin/
-build/pyinstaller/
+# Bundled binaries (ffmpeg / yt-dlp)
+resources/
 
 # Logs
 *.log
@@ -46,16 +44,16 @@ yarn-debug.log*
 yarn-error.log*
 
 # Models (downloaded at runtime)
-python/models/
+models/
+
+# Runtime data (SQLite, task files)
+data/
 
 # Audio files (temporary)
 *.m4a
 *.webm
 *.mp3
 *.wav
-
-# Electron
-*.blockmap
 
 # Test
 coverage/

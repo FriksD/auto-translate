@@ -8,9 +8,9 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT / "python"))
+sys.path.insert(0, str(PROJECT_ROOT))
 
-from services.hltv_scraper import HLTVScraper
+from backend.sources.hltv import HLTVScraper
 
 
 class FakeResponse:
@@ -55,7 +55,7 @@ class HLTVScraperTest(unittest.IsolatedAsyncioTestCase):
         scraper = HLTVScraper()
         scraper._session = FakeSession()
 
-        with self.assertLogs("services.hltv_scraper", level="WARNING") as logs:
+        with self.assertLogs("backend.sources.hltv", level="WARNING") as logs:
             with self.assertRaisesRegex(RuntimeError, "Cloudflare"):
                 await scraper._get("https://www.hltv.org/search?query=vitality")
 

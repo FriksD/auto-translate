@@ -7,7 +7,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from python.services.diarization import DiarizationService
+from backend.pipeline.diarization import DiarizationService
 
 
 class CapturingDiarizationService(DiarizationService):
@@ -48,8 +48,8 @@ class DiarizationServiceTest(unittest.TestCase):
         service = CapturingDiarizationService()
         waveform = torch.zeros(1, 32000)
 
-        with patch("python.services.diarization.torchaudio.load", return_value=(waveform, 32000)):
-            with patch("python.services.diarization.torchaudio.transforms.Resample", FakeResample):
+        with patch("backend.pipeline.diarization.torchaudio.load", return_value=(waveform, 32000)):
+            with patch("backend.pipeline.diarization.torchaudio.transforms.Resample", FakeResample):
                 service.diarize("C:/audio/interview.wav", num_speakers=2)
 
         self.assertEqual(service.captured_sample_rate, 16000)

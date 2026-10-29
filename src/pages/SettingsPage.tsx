@@ -1,368 +1,249 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { Loader2, Save, Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useAppStore } from '@/stores/appStore'
-import { Save, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Textarea } from '@/components/ui/textarea'
+import { Card, CardTitle, Checkbox, ErrorText, Field, Select } from '@/components/ui/form'
+import { ProviderList, SecretInput } from '@/components/settings/ProviderList'
+import { api, LlmStep, Settings } from '@/lib/api'
 
-interface BailianModel {
-  id: string
-  name: string
-  description?: string
-}
-
-export function SettingsPage() {
-  const { settings, setSettings } = useAppStore()
-  const [localSettings, setLocalSettings] = useState(settings)
-  const [showApiKey, setShowApiKey] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [bailianModels, setBailianModels] = useState<BailianModel[]>([])
-  const [loadingModels, setLoadingModels] = useState(false)
-
-  useEffect(() => {
-    // 从electron-store加载设置
-    const loadSettings = async () => {
-      const savedSettings = await window.electronAPI.getStore('settings')
-      if (savedSettings) {
-        setLocalSettings(savedSettings)
-        setSettings(savedSettings)
-      }
-    }
-    loadSettings()
-  }, [setSettings])
-
-  // 当提供商切换到百炼时，获取模型列表
-  useEffect(() => {
-    if (localSettings.llm.provider === 'bailian' && localSettings.llm.apiKey) {
-      fetchBailianModels()
-    }
-  }, [localSettings.llm.provider, localSettings.llm.apiKey])
-
-  const fetchBailianModels = async () => {
-    if (!localSettings.llm.apiKey) return
-    setLoadingModels(true)
-    try {
-      const result = await window.electronAPI.getBailianModels(localSettings.llm.apiKey)
-      if (result && result.models) {
-        setBailianModels(result.models)
-      }
-    } catch (error) {
-      console.error('获取百炼模型列表失败:', error)
-    } finally {
-      setLoadingModels(false)
-    }
-  }
-
-  const handleSave = async () => {
-    await window.electronAPI.setStore('settings', localSettings)
-    setSettings(localSettings)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  const updateLLM = (key: string, value: string) => {
-    setLocalSettings((prev) => ({
-      ...prev,
-      llm: { ...prev.llm, [key]: value },
-    }))
-  }
-
-  const updateWhisper = (key: string, value: string) => {
-    setLocalSettings((prev) => ({
-      ...prev,
-      whisper: { ...prev.whisper, [key]: value },
-    }))
-  }
-
-  const updateDiarization = (key: string, value: string) => {
-    setLocalSettings((prev) => ({
-      ...prev,
-      diarization: { ...prev.diarization, [key]: value },
-    }))
-  }
-
-  const updateOutput = (key: string, value: string) => {
-    setLocalSettings((prev) => ({
-      ...prev,
-      output: { ...prev.output, [key]: value },
-    }))
-  }
-
+function StepPicker({
+  label,
+  hint,
+  step,
+  settings,
+  onChange,
+}: {
+  label: string
+  hint: string
+  step: LlmStep
+  settings: Settings
+  onChange: (step: LlmStep) => void
+}) {
+  const provider = settings.llm.providers.find((p) => p.id === step.provider_id)
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold">设置</h1>
-        <p className="text-muted-foreground">配置应用程序选项</p>
-      </div>
-
-      {/* LLM设置 */}
-      <div className="border rounded-lg p-6 space-y-4">
-        <h2 className="text-lg font-semibold">LLM配置</h2>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">提供商</label>
-          <select
-            value={localSettings.llm.provider}
-            onChange={(e) => updateLLM('provider', e.target.value)}
-            className="w-full border rounded px-3 py-2"
-          >
-            <option value="bailian">阿里百炼 (推荐)</option>
-            <option value="openai">OpenAI</option>
-            <option value="gemini">Google Gemini (官方)</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="relay_openai">OpenAI格式中转站</option>
-            <option value="relay_anthropic">Anthropic格式中转站</option>
-          </select>
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">API Key</label>
-          <div className="relative">
-            <Input
-              type={showApiKey ? 'text' : 'password'}
-              value={localSettings.llm.apiKey}
-              onChange={(e) => updateLLM('apiKey', e.target.value)}
-              placeholder={getApiKeyPlaceholder(localSettings.llm.provider)}
-            />
-            <button
-              type="button"
-              onClick={() => setShowApiKey(!showApiKey)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-            >
-              {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">模型</label>
-          {localSettings.llm.provider === 'bailian' ? (
-            <div className="flex gap-2">
-              <select
-                value={localSettings.llm.model}
-                onChange={(e) => updateLLM('model', e.target.value)}
-                className="flex-1 border rounded px-3 py-2"
-                disabled={loadingModels}
-              >
-                {bailianModels.length > 0 ? (
-                  bailianModels.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name} - {model.description || model.id}
-                    </option>
-                  ))
-                ) : (
-                  <>
-                    <option value="qwen-turbo">通义千问-Turbo - 快速响应</option>
-                    <option value="qwen-plus">通义千问-Plus - 平衡性能</option>
-                    <option value="qwen-max">通义千问-Max - 最强能力</option>
-                    <option value="qwen-max-longcontext">通义千问-Max长文本 - 超长上下文</option>
-                    <option value="qwen-long">通义千问-Long - 长文本专家</option>
-                    <option value="qwen2.5-72b-instruct">Qwen2.5-72B-Instruct - 开源最强</option>
-                    <option value="qwen2.5-32b-instruct">Qwen2.5-32B-Instruct - 中等开源</option>
-                    <option value="qwen2.5-14b-instruct">Qwen2.5-14B-Instruct - 轻量开源</option>
-                    <option value="qwen2.5-7b-instruct">Qwen2.5-7B-Instruct - 最小开源</option>
-                    <option value="deepseek-r1">DeepSeek-R1 - 深度求索推理</option>
-                    <option value="deepseek-v3">DeepSeek-V3 - 深度求索通用</option>
-                    <option value="yi-lightning">零一万物-Lightning - 快速版</option>
-                    <option value="yi-large">零一万物-Large - 大模型</option>
-                  </>
-                )}
-              </select>
-              <Button
-                variant="outline"
-                onClick={fetchBailianModels}
-                disabled={loadingModels || !localSettings.llm.apiKey}
-                title="刷新模型列表"
-              >
-                {loadingModels ? <Loader2 className="h-4 w-4 animate-spin" /> : '刷新'}
-              </Button>
-            </div>
-          ) : (
-            <Input
-              value={localSettings.llm.model}
-              onChange={(e) => updateLLM('model', e.target.value)}
-              placeholder={getModelPlaceholder(localSettings.llm.provider)}
-            />
-          )}
-        </div>
-
-        {(localSettings.llm.provider === 'local' || localSettings.llm.provider === 'relay_openai' || localSettings.llm.provider === 'relay_anthropic') && (
-          <div className="space-y-2">
-            <label className="text-sm font-medium">
-              {localSettings.llm.provider === 'local' ? 'Ollama地址' : '自定义API地址'}
-            </label>
-            <Input
-              value={localSettings.llm.baseUrl || ''}
-              onChange={(e) => updateLLM('baseUrl', e.target.value)}
-              placeholder={
-                localSettings.llm.provider === 'local'
-                  ? 'http://localhost:11434'
-                  : localSettings.llm.provider === 'relay_anthropic'
-                  ? 'https://api.anthropic.com'
-                  : 'https://api.openai.com/v1'
-              }
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Whisper设置 */}
-      <div className="border rounded-lg p-6 space-y-4">
-        <h2 className="text-lg font-semibold">Whisper 语音识别</h2>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">模型目录</label>
-          <p className="text-xs text-muted-foreground">下载 faster-whisper 模型后解压到此目录</p>
-          <div className="flex gap-2">
-            <Input
-              value={localSettings.whisper.modelPath}
-              onChange={(e) => updateWhisper('modelPath', e.target.value)}
-              placeholder="例如: C:\CS-Translator\models\whisper"
-              className="flex-1"
-            />
-            <Button
-              variant="outline"
-              onClick={async () => {
-                const dir = await window.electronAPI.selectDirectory()
-                if (dir) updateWhisper('modelPath', dir)
-              }}
-            >
-              浏览
-            </Button>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">运行设备</label>
-          <select
-            value={localSettings.whisper.device}
-            onChange={(e) => updateWhisper('device', e.target.value)}
-            className="w-full border rounded px-3 py-2"
-          >
-            <option value="cuda">CUDA (NVIDIA GPU 加速)</option>
-            <option value="cpu">CPU (较慢)</option>
-          </select>
-        </div>
-      </div>
-
-      {/* 说话人分离设置 */}
-      <div className="border rounded-lg p-6 space-y-4">
-        <h2 className="text-lg font-semibold">说话人分离 (Diarization)</h2>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">模型目录</label>
-          <p className="text-xs text-muted-foreground">下载 pyannote 模型后解压到此目录，留空则自动从 HuggingFace 下载</p>
-          <div className="flex gap-2">
-            <Input
-              value={localSettings.diarization.modelPath}
-              onChange={(e) => updateDiarization('modelPath', e.target.value)}
-              placeholder="例如: C:\CS-Translator\models\diarization"
-              className="flex-1"
-            />
-            <Button
-              variant="outline"
-              onClick={async () => {
-                const dir = await window.electronAPI.selectDirectory()
-                if (dir) updateDiarization('modelPath', dir)
-              }}
-            >
-              浏览
-            </Button>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">HuggingFace Token</label>
-          <p className="text-xs text-muted-foreground">
-            仅在使用远程模型时需要，在{' '}
-            <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noreferrer" className="underline">
-              huggingface.co/settings/tokens
-            </a>{' '}
-            创建
-          </p>
-          <Input
-            type={showApiKey ? 'text' : 'password'}
-            value={localSettings.diarization.hfToken}
-            onChange={(e) => updateDiarization('hfToken', e.target.value)}
-            placeholder="hf_xxx"
-          />
-        </div>
-      </div>
-
-      {/* 输出设置 */}
-      <div className="border rounded-lg p-6 space-y-4">
-        <h2 className="text-lg font-semibold">输出配置</h2>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">默认输出目录</label>
-          <div className="flex gap-2">
-            <Input
-              value={localSettings.output.defaultDir}
-              onChange={(e) => updateOutput('defaultDir', e.target.value)}
-              placeholder="选择目录..."
-              className="flex-1"
-            />
-            <Button
-              variant="outline"
-              onClick={async () => {
-                const dir = await window.electronAPI.selectDirectory()
-                if (dir) updateOutput('defaultDir', dir)
-              }}
-            >
-              浏览
-            </Button>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">导出格式</label>
-          <select
-            value={localSettings.output.format}
-            onChange={(e) => updateOutput('format', e.target.value)}
-            className="w-full border rounded px-3 py-2"
-          >
-            <option value="markdown">Markdown (.md)</option>
-            <option value="html">HTML (.html)</option>
-            <option value="txt">纯文本 (.txt)</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="flex justify-end">
-        <Button onClick={handleSave}>
-          <Save className="h-4 w-4 mr-2" />
-          {saved ? '已保存' : '保存设置'}
-        </Button>
-      </div>
+    <div className="grid gap-3 md:grid-cols-2">
+      <Field label={label} hint={hint}>
+        <Select value={step.provider_id} onChange={(e) => onChange({ ...step, provider_id: e.target.value })}>
+          <option value="">（未选择）</option>
+          {settings.llm.providers.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="模型" hint="留空则使用供应商的默认模型">
+        <Input
+          value={step.model}
+          placeholder={provider?.model || ''}
+          onChange={(e) => onChange({ ...step, model: e.target.value })}
+        />
+      </Field>
     </div>
   )
 }
 
-function getModelPlaceholder(provider: string): string {
-  switch (provider) {
-    case 'bailian':
-      return 'qwen-turbo'
-    case 'openai':
-      return 'gpt-4-turbo-preview'
-    case 'gemini':
-      return 'gemini-3.1-flash-lite'
-    case 'anthropic':
-      return 'claude-3-opus-20240229'
-    case 'openrouter':
-      return 'anthropic/claude-3-opus'
-    case 'relay_openai':
-      return 'gpt-4o'
-    case 'relay_anthropic':
-      return 'claude-sonnet-4-6'
-    case 'local':
-      return 'llama2'
-    default:
-      return ''
-  }
-}
+export function SettingsPage() {
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [feishuResult, setFeishuResult] = useState('')
 
-function getApiKeyPlaceholder(provider: string): string {
-  if (provider === 'gemini') {
-    return 'AIza...'
+  useEffect(() => {
+    api.getSettings().then(setSettings).catch((e) => setError(e.message))
+  }, [])
+
+  if (!settings) {
+    return error ? <ErrorText>{error}</ErrorText> : <Loader2 className="mx-auto mt-20 h-6 w-6 animate-spin" />
   }
-  return 'sk-...'
+
+  type Section = 'whisper' | 'diarization' | 'llm' | 'feishu'
+  const patch = <K extends Section>(key: K, value: Partial<Settings[K]>) =>
+    setSettings({ ...settings, [key]: { ...settings[key], ...value } })
+
+  const save = async () => {
+    setSaving(true)
+    setError('')
+    try {
+      setSettings(await api.saveSettings(settings))
+      setMessage('已保存')
+      setTimeout(() => setMessage(''), 2000)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const testFeishu = async () => {
+    setFeishuResult('发送中...')
+    try {
+      await api.testFeishu(settings.feishu)
+      setFeishuResult('已发送测试消息，请到飞书查看')
+    } catch (e) {
+      setFeishuResult(`失败：${(e as Error).message}`)
+    }
+  }
+
+  return (
+    <div className="space-y-6 pb-20">
+      <h1 className="text-xl font-semibold">设置</h1>
+
+      <Card>
+        <CardTitle>网络</CardTitle>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="代理" hint="HLTV、视频下载、LLM（可按供应商关闭）共用；留空为直连。飞书始终直连。">
+            <Input value={settings.proxy} onChange={(e) => setSettings({ ...settings, proxy: e.target.value })} placeholder="http://127.0.0.1:7897" />
+          </Field>
+          <Field label="ffmpeg 路径" hint="留空自动查找 PATH">
+            <Input value={settings.ffmpeg_path} onChange={(e) => setSettings({ ...settings, ffmpeg_path: e.target.value })} />
+          </Field>
+        </div>
+      </Card>
+
+      <Card>
+        <CardTitle>LLM</CardTitle>
+        <div className="space-y-6">
+          <ProviderList
+            providers={settings.llm.providers}
+            onChange={(providers) => patch('llm', { providers })}
+          />
+          <div className="space-y-4 border-t pt-5">
+            <StepPicker
+              label="第一步：英文清洗"
+              hint="修正转写错误、统一选手名、整理成英文问答稿"
+              step={settings.llm.clean}
+              settings={settings}
+              onChange={(clean) => patch('llm', { clean })}
+            />
+            <StepPicker
+              label="第二步：中文成稿"
+              hint="翻译润色为中文 Q/A 稿，建议用最强的模型"
+              step={settings.llm.write}
+              settings={settings}
+              onChange={(write) => patch('llm', { write })}
+            />
+            <Field label="Temperature" className="max-w-[200px]">
+              <Input
+                type="number"
+                step="0.1"
+                min="0"
+                max="1.5"
+                value={settings.llm.temperature}
+                onChange={(e) => patch('llm', { temperature: Number(e.target.value) })}
+              />
+            </Field>
+            <Field label="补充写稿要求" hint="对所有稿件生效，会附加在中文成稿的提示词末尾">
+              <Textarea
+                value={settings.llm.extra_instructions}
+                onChange={(e) => patch('llm', { extra_instructions: e.target.value })}
+              />
+            </Field>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <CardTitle>语音转写</CardTitle>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Whisper 模型" hint="本地模型目录，或 large-v3 / large-v3-turbo 等模型名（首次会下载）">
+            <Input value={settings.whisper.model} onChange={(e) => patch('whisper', { model: e.target.value })} />
+          </Field>
+          <Field label="语言" hint="留空自动检测；纯英文采访可填 en">
+            <Input value={settings.whisper.language} onChange={(e) => patch('whisper', { language: e.target.value })} />
+          </Field>
+          <Field label="设备">
+            <Select value={settings.whisper.device} onChange={(e) => patch('whisper', { device: e.target.value })}>
+              <option value="cuda">GPU (cuda)</option>
+              <option value="cpu">CPU</option>
+            </Select>
+          </Field>
+          <Field label="计算精度" hint="8GB 显存用 float16 即可；显存紧张选 int8_float16">
+            <Select value={settings.whisper.compute_type} onChange={(e) => patch('whisper', { compute_type: e.target.value })}>
+              <option value="float16">float16</option>
+              <option value="int8_float16">int8_float16</option>
+              <option value="int8">int8（CPU）</option>
+            </Select>
+          </Field>
+          <Field label="Beam size" hint="越大越准但越慢，1～5">
+            <Input
+              type="number"
+              min="1"
+              max="10"
+              value={settings.whisper.beam_size}
+              onChange={(e) => patch('whisper', { beam_size: Number(e.target.value) })}
+            />
+          </Field>
+        </div>
+        <div className="mt-5 space-y-4 border-t pt-5">
+          <Checkbox
+            checked={settings.diarization.enabled}
+            onChange={(enabled) => patch('diarization', { enabled })}
+            label="启用说话人分离（pyannote，帮助区分主持人和选手）"
+          />
+          {settings.diarization.enabled && (
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="本地模型目录" hint="推荐，免认证">
+                <Input value={settings.diarization.model_path} onChange={(e) => patch('diarization', { model_path: e.target.value })} />
+              </Field>
+              <Field label="HuggingFace Token" hint="仅使用远程模型时需要">
+                <SecretInput value={settings.diarization.hf_token} onChange={(hf_token) => patch('diarization', { hf_token })} />
+              </Field>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Card>
+        <CardTitle>飞书</CardTitle>
+        <div className="space-y-4">
+          <Checkbox
+            checked={settings.feishu.enabled}
+            onChange={(enabled) => patch('feishu', { enabled })}
+            label="初稿完成或处理失败时发送飞书消息"
+          />
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="App ID">
+              <Input value={settings.feishu.app_id} onChange={(e) => patch('feishu', { app_id: e.target.value })} />
+            </Field>
+            <Field label="App Secret">
+              <SecretInput value={settings.feishu.app_secret} onChange={(app_secret) => patch('feishu', { app_secret })} />
+            </Field>
+            <Field label="发送给">
+              <Select
+                value={settings.feishu.receive_id_type}
+                onChange={(e) => patch('feishu', { receive_id_type: e.target.value as Settings['feishu']['receive_id_type'] })}
+              >
+                <option value="chat_id">群聊（chat_id）</option>
+                <option value="open_id">个人（open_id）</option>
+              </Select>
+            </Field>
+            <Field label={settings.feishu.receive_id_type === 'chat_id' ? '群 chat_id' : '用户 open_id'} hint="应用需要先被拉进群，或对该用户可见">
+              <Input value={settings.feishu.receive_id} onChange={(e) => patch('feishu', { receive_id: e.target.value })} />
+            </Field>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button size="sm" variant="outline" onClick={testFeishu}>
+              <Send className="mr-2 h-4 w-4" />
+              发送测试消息
+            </Button>
+            {feishuResult && <span className="text-sm text-muted-foreground">{feishuResult}</span>}
+          </div>
+        </div>
+      </Card>
+
+      <div className="fixed inset-x-0 bottom-0 border-t bg-background/95 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-6 py-3">
+          <Button onClick={save} disabled={saving}>
+            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            保存设置
+          </Button>
+          {message && <span className="text-sm text-emerald-700">{message}</span>}
+          <ErrorText>{error}</ErrorText>
+        </div>
+      </div>
+    </div>
+  )
 }

@@ -1,224 +1,86 @@
-# CS Interview Video Auto-Translate
+# Auto-Translate-to-News
 
-自动将CS相关的YouTube访谈视频翻译成中文新闻稿的桌面应用程序。
+CS2 赛后采访自动翻译的本地服务：音频 → Whisper 转写 → LLM 两段式翻译润色 → 名词规范化 → Word 初稿 → 飞书发送，人工精校出终稿。
 
-A desktop application that automatically downloads CS-related YouTube interview videos, performs speech-to-text transcription (faster-whisper), speaker diarization (pyannote.audio), translates the content, and generates polished Chinese news articles using LLM APIs.
+设计文档：[docs/superpowers/specs/2026-10-29-live-interview-pipeline-design.md](docs/superpowers/specs/2026-10-29-live-interview-pipeline-design.md)
 
-## 功能特点
-
--  **YouTube视频下载**: 自动下载视频音频
--  **语音识别**: 使用faster-whisper进行高精度转录
--  **说话人分离**: 自动区分不同说话人
--  **多LLM支持**: 支持OpenAI、Claude、OpenRouter、阿里百炼等
--  **HLTV数据集成**: 自动获取战队和选手信息
--  **新闻稿生成**: 智能翻译并改写成专业新闻稿
+当前是**第一阶段**：手动提供音频（上传文件或视频链接），自动跑完后处理全流程。HLTV 比赛列表、预约、直播录制、采访自动定位会在后续阶段加入。
 
 ## 环境要求
 
-- **Node.js** 20+
-- **Python** 3.10+
-- **CUDA支持的GPU**（推荐，用于加速语音识别）
-- **Git**
+- Python 3.10+
+- Node.js 20+（只用于构建前端）
+- ffmpeg（在 PATH 中，或在设置页填写路径）
+- NVIDIA GPU（推荐）。faster-whisper 使用 CTranslate2 自带的 CUDA 支持，需要 CUDA 12 的 cuBLAS 和 cuDNN 9；不可用时会自动退回 CPU。
 
-## 快速开始
-
-### 1. 克隆仓库
+## 安装
 
 ```bash
-git clone https://github.com/FriksD/auto-translate.git
-cd auto-translate
+pip install -r requirements.txt
 ```
-
-### 2. 安装 Node.js 依赖
 
 ```bash
 npm install
 ```
 
-### 3. 安装 Python 依赖
+```bash
+npm run build
+```
+
+Whisper 模型：把 faster-whisper 格式的模型放在 `models/whisper/`（含 `model.bin`），或在设置页直接填写模型名（如 `large-v3`、`large-v3-turbo`），首次运行会自动下载。
+
+## 启动
 
 ```bash
-cd python
-pip install -r requirements.txt
-cd ..
+python -m backend
 ```
 
-> **Windows 用户注意**：部分 Python 包（如 torch、pyannote.audio）需要 Microsoft Visual C++ 运行时。如安装失败，请参考下方[常见问题](#常见问题)。
+浏览器打开 http://127.0.0.1:8000 。
 
-### 4. 下载运行时二进制文件
+开发前端时可以另开一个终端运行 `npm run dev`（http://localhost:5173 ，API 自动转发到 8000 端口）。
+
+## 首次配置（设置页）
+
+1. **代理**：默认 `http://127.0.0.1:7897`，HLTV、视频下载、LLM 共用；飞书始终直连。
+2. **LLM**：添加自定义供应商（OpenAI 兼容或 Anthropic 兼容，填写 Base URL、API Key、模型），点「测试连接」确认可用，然后为「英文清洗」和「中文成稿」两步分别选择供应商。
+3. **飞书**（可选）：填写自建应用的 App ID / App Secret，选择发送到群聊（chat_id）或个人（open_id）。应用需要开通机器人能力和 `im:message`、`im:resource` 权限，并被拉进目标群。
+
+## 使用
+
+1. 「任务」页新建任务：填写两支队伍（用于从 HLTV 抓取阵容），选择视频链接或上传本地文件；视频较长时可以填写截取的起止时间。
+2. 流水线自动执行：抓取背景信息 → 获取音频 → 语音转写 → 英文清洗 → 中文成稿 → 生成 Word → 飞书发送。
+3. 在任务详情页查看和修改每一步的结果：
+   - **中文稿**：修改后点「保存并重新生成 Word」。
+   - **英文清洗稿**：修改后点「保存并重新翻译」。
+   - **背景信息**：队名、阵容、教练就是稿件的规范写法，抓取失败或不全时在这里补。
+   - **名词报告**：自动替换了哪些名字，哪些需要人工核对。
+   - 任意阶段失败后，可以选择从该阶段重跑。
+4. 下载 Word（或在飞书中接收），精校后点「标记完成」。
+
+### 稿件格式
+
+- `Q：` 开头的主持人问题整段加粗；`A：` 开头的选手回答不加粗。
+- 全文小四（12pt），A4，字体为 Word 默认。
+
+### 专有名词
+
+选手名、战队名必须与 HLTV 完全一致（如 `m0NESY`、`ZywOo`），通过三层保证：
+
+1. 阵容写入 Whisper 提示词，提高识别率。
+2. LLM 两步都附带规范名表。
+3. 成稿后确定性替换：大小写、leet 数字、空格或符号不同的写法（`monesy`、`Mo Nesy`、`Zywo0`）都会被替换成规范写法；拼写相近但无法确定的会列入待核对。
+
+「术语表」页可以添加别名（如 `NAVI → Natus Vincere`、`小蜜蜂 → Vitality`）和术语的固定译法。
+
+## 数据
+
+所有数据都在 `data/` 目录下（可用环境变量 `ATN_DATA_DIR` 修改）：
+
+- `app.db`：任务、日志、术语表、设置
+- `tasks/<id>/`：每个任务的音频、转写、各步中间稿、提示词和 Word 文件
+
+## 测试
 
 ```bash
-node scripts/download-binaries.js
+python -m unittest discover -s tests
 ```
-
-此脚本会自动下载 `yt-dlp.exe` 到 `resources/bin/`。ffmpeg 需手动下载：
-
-1. 访问 https://www.gyan.dev/ffmpeg/builds/
-2. 下载 `ffmpeg-release-essentials.zip`
-3. 将 `ffmpeg.exe` 和 `ffprobe.exe` 解压到 `resources/bin/`
-
-### 5. 配置环境变量
-
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 文件，填入你的 API 密钥：
-
-| 变量 | 必填 | 说明 |
-|---|---|---|
-| `BAILIAN_API_KEY` | 推荐 | 阿里百炼 API Key（推荐国内用户使用） |
-| `OPENAI_API_KEY` | 否 | OpenAI API Key |
-| `ANTHROPIC_API_KEY` | 否 | Anthropic Claude API Key |
-| `OPENROUTER_API_KEY` | 否 | OpenRouter API Key |
-| `DIARIZATION_MODEL_PATH` | 推荐 | 本地 pyannote 说话人分离模型路径 |
-| `HF_TOKEN` | 可选 | HuggingFace Token（仅远程模式需要） |
-| `PYTHON_SERVER_PORT` | 否 | Python 服务端口（默认 8000） |
-
-> 至少需要配置一个 LLM 提供商的 API Key。
-
-### 6. 配置说话人分离（推荐本地模型）
-
-支持两种模式：
-
-**本地模型模式（推荐）**：下载模型后不依赖 HuggingFace 在线服务，启动更快、更稳定。
-
-```env
-DIARIZATION_MODEL_PATH=C:/models/pyannote/speaker-diarization-3.1
-```
-
-**远程模型 ID 模式**：不设置 `DIARIZATION_MODEL_PATH` 时，使用 `DIARIZATION_MODEL_ID`（默认 `pyannote/speaker-diarization-3.1`），通常需要 `HF_TOKEN`。
-
-```env
-# DIARIZATION_MODEL_ID=pyannote/speaker-diarization-3.1
-# HF_TOKEN=hf_xxx
-```
-
-## 运行
-
-### 开发模式
-
-一键启动（前端 + Python 后端）：
-
-```bash
-npm run electron:dev
-```
-
-或分别启动（两个终端）：
-
-```bash
-# 终端 1：前端开发服务器
-npm run dev
-
-# 终端 2：Python 服务
-cd python && python server.py
-```
-
-### 构建生产版本
-
-```bash
-npm run build:full
-```
-
-此命令会：
-1. 使用 PyInstaller 将 Python 后端打包为独立可执行文件
-2. 使用 Vite + electron-builder 构建桌面应用
-
-构建产物位于 `release/` 目录，包含：
-- `CS Interview Translator-portable-1.0.0.exe` — 便携版
-- `CS Interview Translator-setup-1.0.0.exe` — 安装版
-
-## 使用流程
-
-1. **输入视频**: 粘贴YouTube视频链接
-2. **自动处理**: 系统自动下载音频、转录、分离说话人
-3. **标注说话人**: 为识别出的说话人输入名字
-4. **补充信息**: 可选添加HLTV战队/选手信息
-5. **生成新闻稿**: LLM自动翻译并生成新闻稿
-6. **编辑导出**: 编辑并导出最终稿件
-
-## 配置
-
-在设置页面可以配置：
-
-- **LLM提供商**: OpenAI / Claude / OpenRouter / 阿里百炼 / 自定义
-- **Whisper模型**: tiny / small / medium / large-v3
-- **输出格式**: Markdown / HTML / 纯文本
-
-## 项目结构
-
-```
-├── electron/              # Electron 主进程
-│   ├── main.ts           # 入口，窗口管理，IPC
-│   ├── preload.ts        # 预加载脚本（contextBridge）
-│   └── services/         # 后端桥接服务
-│       ├── python-bridge.ts  # Python FastAPI 通信
-│       ├── store.ts          # electron-store 封装
-│       └── youtube.ts        # yt-dlp 音频下载
-├── src/                  # React 前端
-│   ├── main.tsx          # React 入口
-│   ├── App.tsx           # 路由配置
-│   ├── components/       # UI 组件
-│   │   ├── layout/       # 布局组件
-│   │   ├── project/      # 项目流程组件
-│   │   └── ui/           # 基础 UI 组件
-│   ├── pages/            # 页面
-│   ├── stores/           # Zustand 状态管理
-│   └── lib/              # 工具函数
-├── python/               # Python 处理服务
-│   ├── server.py         # FastAPI 服务入口
-│   └── services/         # 核心处理模块
-│       ├── whisper_service.py    # faster-whisper 转录
-│       ├── diarization.py        # pyannote 说话人分离
-│       ├── llm_service.py        # 多LLM翻译
-│       └── hltv_scraper.py       # HLTV数据抓取
-├── scripts/              # 构建脚本
-│   ├── build-backend.js        # PyInstaller 打包
-│   └── download-binaries.js    # 下载 yt-dlp/ffmpeg
-├── build/                # PyInstaller 配置
-│   ├── backend.spec            # PyInstaller spec
-│   └── hook-torch-dll.py       # torch DLL 钩子
-├── tests/                # 测试文件
-└── resources/
-    └── bin/              # 运行时二进制文件（需下载）
-```
-
-## 技术栈
-
-- **前端**: React + TypeScript + Tailwind CSS
-- **桌面**: Electron
-- **后端**: Python + FastAPI
-- **AI**: faster-whisper + pyannote.audio + OpenAI/Claude/Bailian API
-
-## 常见问题
-
-### Python 依赖安装失败
-
-安装 Microsoft Visual C++ Build Tools：
-https://visualstudio.microsoft.com/visual-cpp-build-tools/
-
-### CUDA 显存不足（Out of Memory）
-
-在设置页面将 Whisper 模型切换为 `tiny` 或 `small`，或将计算设备切换为 CPU。
-
-### 端口冲突
-
-修改 `.env` 中的 `PYTHON_SERVER_PORT` 为其他端口（如 `8001`）。
-
-### ffmpeg 未找到
-
-运行 `node scripts/download-binaries.js` 并手动下载 ffmpeg（见[步骤 4](#4-下载运行时二进制文件)）。
-
-### 启动后白屏
-
-确保先执行 `npm run dev` 构建前端，再启动 Electron。或直接使用 `npm run electron:dev` 一键启动。
-
-## 安全说明
-
-- `.env` 文件包含 API 密钥，已通过 `.gitignore` 排除，**切勿提交到仓库**
-- `.env.example` 仅包含占位符，可安全提交
-- 仓库不含任何真实的 API 密钥或 Token
-
-## 许可证
-
-MIT
