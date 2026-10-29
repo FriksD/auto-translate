@@ -12,13 +12,21 @@ import { TextEditor } from '@/components/task/TextEditor'
 import { api, formatSeconds, formatTime, isRunning, StageMeta, STATE_COLORS, STATE_LABELS, TaskDetail } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
+const METHOD_LABELS: Record<string, string> = {
+  exact: '拼写归一',
+  alias: '术语表别名',
+  phonetic: '发音推断',
+  skeleton: '发音推断',
+  llm: '上下文推断',
+}
+
 function NamesReportView({ task }: { task: TaskDetail }) {
   const report = task.names_report
   if (!report) return <p className="py-8 text-center text-sm text-muted-foreground">中文成稿后生成</p>
   return (
     <div className="space-y-5 text-sm">
       <section>
-        <h3 className="mb-2 font-medium">待人工核对（与规范名相近但未自动替换）</h3>
+        <h3 className="mb-2 font-medium">待人工核对（推断不出来的）</h3>
         {report.suspects.length === 0 && report.ambiguous.length === 0 ? (
           <p className="text-muted-foreground">无</p>
         ) : (
@@ -38,6 +46,7 @@ function NamesReportView({ task }: { task: TaskDetail }) {
       </section>
       <section>
         <h3 className="mb-2 font-medium">已自动替换</h3>
+        <p className="mb-2 text-xs text-muted-foreground">标黄的是按发音或上下文推断出来的，建议精校时顺带确认。</p>
         {report.replaced.length === 0 ? (
           <p className="text-muted-foreground">无</p>
         ) : (
@@ -46,6 +55,14 @@ function NamesReportView({ task }: { task: TaskDetail }) {
               <li key={`${r.from}-${r.to}`}>
                 <span className="text-muted-foreground line-through">{r.from}</span> → {r.to}
                 {r.count > 1 && <span className="text-muted-foreground"> ×{r.count}</span>}
+                <span
+                  className={cn(
+                    'ml-2 rounded px-1.5 py-0.5 text-xs',
+                    r.method === 'exact' || r.method === 'alias' ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-800',
+                  )}
+                >
+                  {METHOD_LABELS[r.method] ?? r.method}
+                </span>
               </li>
             ))}
           </ul>

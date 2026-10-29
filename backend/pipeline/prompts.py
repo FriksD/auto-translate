@@ -146,3 +146,29 @@ def whisper_prompt(canonical_names: List[str]) -> str:
     if not canonical_names:
         return ""
     return "CS2 post-match interview. Players and teams: " + ", ".join(canonical_names[:60]) + "."
+
+
+NAME_RESOLVE_SYSTEM = "You are a CS2 esports fact checker. You answer with strict JSON only."
+
+
+def build_name_resolution_prompt(contexts: Dict[str, List[str]], context: Dict[str, Any],
+                                 canonical_names: List[str]) -> str:
+    """让 LLM 结合上下文判断稿件中残留的英文词是否是被识别错的选手/战队名。"""
+    items = "\n".join(
+        f'- "{token}": ' + " | ".join(f"…{s}…" for s in snippets) for token, snippets in contexts.items()
+    )
+    return f"""下面是一篇 CS2 赛后采访中文稿里残留的英文词，以及它们在稿件中的上下文。
+原始音频经过语音识别，选手名、战队名常被误识别成发音相近的普通单词或错误拼写（例如 sh1ro 被识别成 Shearer）。
+
+请结合上下文和发音，判断每个词是否其实指的是【规范名表】中的某个名字：
+- 是：给出规范名表中的写法（必须逐字一致）
+- 不是（普通词汇、地图、赛事、术语，或无法确定）：给出 null
+
+只输出一个 JSON 对象，键为原词，值为规范名或 null，不要输出任何其他内容。
+
+【规范名表】
+{format_name_table(context, canonical_names)}
+
+【待判断的词】
+{items}
+"""

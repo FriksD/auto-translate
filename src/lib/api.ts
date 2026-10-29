@@ -58,7 +58,7 @@ export interface TaskEvent {
 }
 
 export interface NamesReport {
-  replaced: { from: string; to: string; count: number }[]
+  replaced: { from: string; to: string; count: number; method: 'exact' | 'alias' | 'phonetic' | 'skeleton' | 'llm' }[]
   suspects: { token: string; candidates: string[] }[]
   ambiguous: { token: string; candidates: string[] }[]
   unknown: string[]

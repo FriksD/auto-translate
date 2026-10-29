@@ -27,7 +27,7 @@ from ..runner import PipelineRunner
 from ..sources.hltv import HLTVScraper
 from . import prompts
 from .docx_export import export_docx
-from .names import NameNormalizer, collect_canonical_names
+from .names import NameNormalizer, collect_canonical_names, replace_tokens, token_contexts
 
 logger = logging.getLogger(__name__)
 
@@ -193,16 +193,42 @@ def _get_diarizer(settings: Dict[str, Any]):
         return _diarizer
 
 
-def assign_speakers(segments: List[Dict[str, Any]], turns: List[Dict[str, Any]]) -> None:
-    """按时间重叠最多的原则给每个转写片段标注说话人。"""
+def _speaker_at(turns: List[Dict[str, Any]], start: float, end: float) -> Optional[str]:
+    """时间重叠最多的说话人；完全不重叠时取最近的一段。"""
+    best, best_overlap = None, 0.0
+    for turn in turns:
+        overlap = min(end, turn["end"]) - max(start, turn["start"])
+        if overlap > best_overlap:
+            best, best_overlap = turn["speaker"], overlap
+    if best is None and turns:
+        middle = (start + end) / 2
+        best = min(turns, key=lambda t: min(abs(middle - t["start"]), abs(middle - t["end"])))["speaker"]
+    return best
+
+
+def split_by_speaker(segments: List[Dict[str, Any]], turns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    按说话人重新切分转写片段。Whisper 的片段常常跨越提问和回答，
+    这里用词级时间戳给每个词标注说话人，再把连续同一说话人的词合并成一段。
+    """
+    result: List[Dict[str, Any]] = []
     for seg in segments:
-        best, best_overlap = None, 0.0
-        for turn in turns:
-            overlap = min(seg["end"], turn["end"]) - max(seg["start"], turn["start"])
-            if overlap > best_overlap:
-                best, best_overlap = turn["speaker"], overlap
-        if best:
-            seg["speaker"] = best
+        words = seg.get("words") or []
+        if not words:
+            result.append({**seg, "speaker": _speaker_at(turns, seg["start"], seg["end"])})
+            continue
+        for word in words:
+            speaker = _speaker_at(turns, word["start"], word["end"])
+            if result and result[-1].get("speaker") == speaker and "words" in result[-1]:
+                current = result[-1]
+                current["end"] = word["end"]
+                current["words"].append(word)
+            else:
+                result.append({"start": word["start"], "end": word["end"], "speaker": speaker, "words": [word]})
+    for seg in result:
+        if "words" in seg:
+            seg["text"] = "".join(w["word"] for w in seg["words"]).strip()
+    return [seg for seg in result if seg.get("text")]
 
 
 def stage_transcribe(task_id: int) -> None:
@@ -221,12 +247,14 @@ def stage_transcribe(task_id: int) -> None:
         set_progress(task_id, update.get("progress"), update.get("message", ""))
 
     cfg = settings["whisper"]
+    diarize = settings["diarization"]["enabled"]
     result = whisper.transcribe(
         str(audio),
         language=cfg["language"] or None,
         progress_callback=on_progress,
         initial_prompt=prompts.whisper_prompt(names_for_prompt) or None,
         beam_size=int(cfg.get("beam_size") or 1),
+        word_timestamps=diarize,
     )
     db.add_event(
         task_id,
@@ -234,12 +262,16 @@ def stage_transcribe(task_id: int) -> None:
         stage="transcribe",
     )
 
-    if settings["diarization"]["enabled"]:
+    if diarize:
         set_progress(task_id, None, "正在进行说话人分离...")
         try:
             diarized = _get_diarizer(settings).diarize(str(audio), min_speakers=2, max_speakers=4)
-            assign_speakers(result["segments"], diarized["segments"])
-            db.add_event(task_id, f"说话人分离完成：{diarized['num_speakers']} 人", stage="transcribe")
+            result["segments"] = split_by_speaker(result["segments"], diarized["segments"])
+            db.add_event(
+                task_id,
+                f"说话人分离完成：{diarized['num_speakers']} 人，按说话人切分为 {len(result['segments'])} 段",
+                stage="transcribe",
+            )
         except Exception as error:
             # 说话人分离只是辅助，失败不阻塞流程
             db.add_event(task_id, f"说话人分离失败，已跳过：{error}", level="warning", stage="transcribe")
@@ -274,15 +306,50 @@ def stage_clean(task_id: int) -> None:
     write_text(task_id, "clean_en.txt", text)
 
 
-def normalize_draft(task_id: int) -> Dict[str, Any]:
+def _parse_json_object(text: str) -> Dict[str, Any]:
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        raise ValueError("LLM 没有返回 JSON")
+    return json.loads(match.group(0))
+
+
+def resolve_names_with_llm(task_id: int, settings: Dict[str, Any], text: str, report: Dict[str, Any],
+                           canonical: List[str]) -> str:
+    """规则推断不了的词，结合上下文交给 LLM 判断；只接受规范名表里的名字。"""
+    tokens = [s["token"] for s in report["suspects"]] + report["unknown"]
+    contexts = token_contexts(text, tokens)
+    if not contexts or not canonical:
+        return text
+    task = _task(task_id)
+    user = prompts.build_name_resolution_prompt(contexts, task["context"], canonical)
+    set_progress(task_id, None, "LLM 正在结合上下文核对名词...")
+    try:
+        answer = _parse_json_object(_llm_call(settings, "clean", prompts.NAME_RESOLVE_SYSTEM, user))
+    except Exception as error:
+        db.add_event(task_id, f"LLM 名词核对失败，已跳过：{error}", level="warning", stage="write")
+        return text
+
+    canonical_set = set(canonical)
+    mapping = {t: v for t, v in answer.items() if t in contexts and isinstance(v, str) and v in canonical_set}
+    text, counts = replace_tokens(text, mapping)
+    for token, count in counts.items():
+        report["replaced"].append({"from": token, "to": mapping[token], "method": "llm", "count": count})
+    report["suspects"] = [s for s in report["suspects"] if s["token"] not in counts]
+    report["unknown"] = [u for u in report["unknown"] if u not in counts]
+    return text
+
+
+def normalize_draft(task_id: int, use_llm: bool = True) -> Dict[str, Any]:
     """对中文稿做名词规范化，写出 draft_zh.txt 和 names_report.json。"""
     task = _task(task_id)
     canonical, aliases = _names(task)
     _, terms = _glossary()
     normalizer = NameNormalizer(canonical, aliases, known_words=terms.keys())
     text, report = normalizer.normalize(read_text(task_id, "draft_raw_zh.txt"))
-    write_text(task_id, "draft_zh.txt", text)
     report_dict = report.to_dict()
+    if use_llm and (report_dict["suspects"] or report_dict["unknown"]):
+        text = resolve_names_with_llm(task_id, db.get_settings(), text, report_dict, sorted(normalizer.canonical))
+    write_text(task_id, "draft_zh.txt", text)
     write_text(task_id, "names_report.json", json.dumps(report_dict, ensure_ascii=False, indent=1))
     return report_dict
 
@@ -302,7 +369,8 @@ def stage_write(task_id: int) -> None:
 
     report = normalize_draft(task_id)
     replaced = sum(item["count"] for item in report["replaced"])
-    message = f"名词规范化：替换 {replaced} 处"
+    inferred = sum(item["count"] for item in report["replaced"] if item["method"] in ("phonetic", "skeleton", "llm"))
+    message = f"名词规范化：替换 {replaced} 处（其中按发音或上下文推断 {inferred} 处）"
     if report["suspects"]:
         message += "；待核对：" + "、".join(f"{s['token']}→{'/'.join(s['candidates'])}" for s in report["suspects"])
     db.add_event(task_id, message, level="warning" if report["suspects"] else "info", stage="write")

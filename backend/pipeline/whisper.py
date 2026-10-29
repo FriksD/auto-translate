@@ -60,6 +60,7 @@ class WhisperService:
         progress_callback: Optional[Callable[..., None]] = None,
         initial_prompt: Optional[str] = None,
         beam_size: int = 1,
+        word_timestamps: bool = False,
     ) -> Dict[str, Any]:
         """
         转录音频文件
@@ -103,6 +104,7 @@ class WhisperService:
             language=language,
             beam_size=beam_size,
             initial_prompt=initial_prompt,
+            word_timestamps=word_timestamps,
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=500),
             condition_on_previous_text=False,

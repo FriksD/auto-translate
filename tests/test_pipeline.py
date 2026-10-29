@@ -29,7 +29,8 @@ class FakeWhisper:
     def __init__(self):
         self.initial_prompt = None
 
-    def transcribe(self, path, language=None, progress_callback=None, initial_prompt=None, beam_size=1):
+    def transcribe(self, path, language=None, progress_callback=None, initial_prompt=None, beam_size=1,
+                   word_timestamps=False):
         self.initial_prompt = initial_prompt
         return {
             "segments": [
