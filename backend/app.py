@@ -3,6 +3,8 @@
 
 启动：python -m backend   （默认 http://127.0.0.1:8000）
 """
+import asyncio
+import io
 import json
 import logging
 import shutil
@@ -13,20 +15,23 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config, db, llm
 from .integrations import feishu
-from .pipeline import stages
+from .pipeline import live, match_sources, stages
+from .pipeline.watcher import MatchWatcher
 from .runner import STAGES, STAGE_KEYS, PipelineRunner, State
-from .sources import hltv_parse
+from .sources import bo3, hltv_parse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 runner = PipelineRunner()
+watcher = MatchWatcher(stages.hltv, live.manager, runner)
+LIVE_TASK_STATES = (State.RESERVED, State.WATCHING, State.RECORDING, State.INTERVIEW_DETECTING, State.NO_INTERVIEW)
 
 
 async def _notify_failure(task_id: int, message: str) -> None:
@@ -53,9 +58,25 @@ async def lifespan(_: FastAPI):
     stages.register(runner)
     runner.on_failure(_notify_failure)
     runner.start()
+
+    loop = asyncio.get_running_loop()
+
+    def enqueue_threadsafe(task_id: int, stage: str) -> None:
+        def enqueue() -> None:
+            try:
+                runner.enqueue(task_id, stage)
+            except ValueError as error:
+                db.add_event(task_id, f"无法开始后处理：{error}", level="error")
+        loop.call_soon_threadsafe(enqueue)
+
+    live.manager.bind(enqueue_threadsafe)
+    await run_in_threadpool(live.manager.resume_all)
+    watcher.start()
     logger.info("服务已启动，数据目录：%s", config.DATA_DIR)
     yield
+    await watcher.stop()
     await runner.stop()
+    await run_in_threadpool(live.manager.stop_all)
     await stages.browser.close()
 
 
@@ -256,6 +277,7 @@ async def delete_task(task_id: int):
     task = _require_task(task_id)
     if task["state"] in (State.QUEUED, State.PROCESSING):
         raise HTTPException(409, "任务正在处理中，请先取消")
+    await run_in_threadpool(live.manager.stop, task_id)
     db.delete_task(task_id)
     shutil.rmtree(config.TASKS_DIR / str(task_id), ignore_errors=True)
     stages.progress.pop(task_id, None)
@@ -267,6 +289,8 @@ async def upload_source(task_id: int, file: UploadFile = File(...)):
     task = _require_task(task_id)
     if task["state"] in (State.QUEUED, State.PROCESSING):
         raise HTTPException(409, "任务正在处理中")
+    # 直播任务改为人工上传音频时，停止监视和录制
+    await run_in_threadpool(live.manager.stop, task_id, "改为上传音频")
     suffix = Path(file.filename or "").suffix or ".bin"
     directory = config.task_dir(task_id)
     for old in directory.glob("source.*"):
@@ -293,6 +317,14 @@ async def run_task(task_id: int, body: RunRequest):
 @app.post("/api/tasks/{task_id}/cancel")
 async def cancel_task(task_id: int):
     task = _require_task(task_id)
+    if task["state"] in LIVE_TASK_STATES:
+        # 取消预约 / 停止监视和录制
+        await run_in_threadpool(live.manager.stop, task_id, "已取消")
+        if task["match_hltv_id"]:
+            await stages.hltv.unwatch_match(int(task["match_hltv_id"]))
+        db.update_task(task_id, state=State.CANCELLED)
+        db.add_event(task_id, "已取消", level="warning")
+        return db.get_task(task_id)
     if task["state"] not in (State.QUEUED, State.PROCESSING):
         raise HTTPException(400, "任务不在处理中")
     db.update_task(task_id, cancel_requested=True)
@@ -325,6 +357,140 @@ async def download_file(task_id: int, name: str):
     if path.parent != config.task_dir(task_id).resolve() or not path.is_file():
         raise HTTPException(404, "文件不存在")
     return FileResponse(path, filename=path.name)
+
+
+# ── 直播：监视、录制、采访截取 ────────────────────────────────────────────────
+
+class StreamRequest(BaseModel):
+    url: Optional[str] = None
+    name: Optional[str] = None
+    provider: Optional[str] = None
+
+
+class CaptureRequest(BaseModel):
+    start: float
+    end: float
+
+
+def _require_live(task_id: int) -> Dict[str, Any]:
+    task = _require_task(task_id)
+    if task["source_type"] != "live":
+        raise HTTPException(400, "不是直播任务")
+    return task
+
+
+class SourceRequest(BaseModel):
+    # bo3.gg 比赛链接或 slug；留空表示重新自动匹配
+    bo3: str = ""
+
+
+@app.get("/api/tasks/{task_id}/live")
+async def live_status(task_id: int):
+    task = _require_live(task_id)
+    status = await run_in_threadpool(live.manager.status, task_id)
+    status["streams"] = await run_in_threadpool(live.candidate_streams, task, status)
+    return status
+
+
+@app.put("/api/tasks/{task_id}/live/source")
+async def live_set_source(task_id: int, body: SourceRequest):
+    """手动指定 bo3.gg 上对应的比赛（自动按队名匹配失败时）。"""
+    task = _require_live(task_id)
+    slug = body.bo3.strip().rstrip("/").rsplit("/", 1)[-1]
+    if not slug:
+        match_sources.set_source_id(task_id, "bo3", None)
+    else:
+        client = bo3.Bo3Client(config.proxy_or_none(db.get_settings()))
+        try:
+            match = await client.get_match(slug)
+        except Exception as error:
+            raise HTTPException(400, f"读取 bo3.gg 比赛失败：{error}")
+        swapped = bo3.same_team(task["team1"] or "", [match["team2"]["name"]])
+        match_sources.set_source_id(task_id, "bo3", {"slug": slug, "swapped": swapped})
+        db.add_event(task_id, f"已手动关联 bo3.gg 比赛：{slug}")
+    watcher.check_soon(task_id)
+    return {"ok": True}
+
+
+@app.post("/api/tasks/{task_id}/live/match-over")
+async def live_match_over(task_id: int):
+    """人工确认比赛已结束（比分数据源不可用时），开始按赛后流程监听采访。"""
+    task = _require_live(task_id)
+    if live.load_state(task_id).get("match_over_at"):
+        raise HTTPException(409, "已经记录为比赛结束")
+    if task["state"] not in (State.WATCHING, State.RECORDING):
+        raise HTTPException(409, "只有监视中或录制中的任务可以标记比赛结束")
+    await watcher.mark_over(task_id)
+    return db.get_task(task_id)
+
+
+@app.post("/api/tasks/{task_id}/live/check")
+async def live_check(task_id: int):
+    _require_live(task_id)
+    watcher.check_soon(task_id)
+    return {"ok": True}
+
+
+@app.post("/api/tasks/{task_id}/live/record")
+async def live_record(task_id: int, body: StreamRequest):
+    """立即开始录制，或切换直播源（不填 url 时自动选官方流）。"""
+    task = _require_live(task_id)
+    if task["state"] in (State.QUEUED, State.PROCESSING):
+        raise HTTPException(409, "任务正在处理中")
+    stream = body.model_dump() if body.url else None
+    if stream is None:
+        state = live.load_state(task_id)
+        stream = state.get("stream") or live.pick_stream(live.candidate_streams(task, state))
+    if not stream or not stream.get("url"):
+        raise HTTPException(400, "没有找到官方直播源，请填写直播链接")
+    try:
+        await run_in_threadpool(live.manager.start, task_id, stream)
+    except RuntimeError as error:
+        raise HTTPException(400, str(error))
+    if task["state"] in (State.RESERVED, State.WATCHING):
+        db.update_task(task_id, state=State.RECORDING)
+    elif task["state"] not in (State.RECORDING, State.INTERVIEW_DETECTING):
+        # 已判定无采访、或已截取过，又重新录：直接进入采访监听
+        live.manager.mark_match_over(task_id)
+        db.update_task(task_id, state=State.INTERVIEW_DETECTING)
+    return await run_in_threadpool(live.manager.status, task_id)
+
+
+@app.post("/api/tasks/{task_id}/live/capture")
+async def live_capture(task_id: int, body: CaptureRequest):
+    _require_live(task_id)
+    try:
+        await run_in_threadpool(live.manager.capture, task_id, body.start, body.end, "manual")
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(400, str(error))
+    return db.get_task(task_id)
+
+
+@app.post("/api/tasks/{task_id}/live/no-interview")
+async def live_no_interview(task_id: int):
+    _require_live(task_id)
+    await run_in_threadpool(live.manager.no_interview, task_id, "人工确认本场无采访")
+    return db.get_task(task_id)
+
+
+@app.get("/api/tasks/{task_id}/live/audio")
+async def live_audio(task_id: int, start: float, end: float):
+    """试听录音的某一段（相对录制开始的秒数，最长 10 分钟）。"""
+    _require_live(task_id)
+    state = live.load_state(task_id)
+    if not state.get("recording"):
+        raise HTTPException(404, "还没有录音")
+    end = min(end, start + 600)
+    chunks = sorted(live.manager.chunk_dir(task_id).glob("c_*.wav"))
+    if live.manager.is_recording(task_id):
+        chunks = chunks[:-1]
+    timeline = live.chunk_timeline(chunks, state["recording"]["started_at"])
+    buffer = io.BytesIO()
+    try:
+        await run_in_threadpool(live.cut_audio, timeline, start, end, buffer)
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+    return Response(buffer.getvalue(), media_type="audio/wav")
 
 
 # ── HLTV 比赛 ─────────────────────────────────────────────────────────────────

@@ -57,6 +57,7 @@ function ProviderRow({
           <Select value={provider.protocol} onChange={(e) => set('protocol', e.target.value as LlmProvider['protocol'])}>
             <option value="openai">OpenAI 兼容</option>
             <option value="anthropic">Anthropic 兼容</option>
+            <option value="gemini">Google Gemini 原生（v1beta）</option>
           </Select>
         </Field>
         <div className="flex items-end">
@@ -68,7 +69,9 @@ function ProviderRow({
       <div className="grid gap-3 md:grid-cols-2">
         <Field
           label="Base URL"
-          hint={provider.protocol === 'openai' ? '例如 https://api.openai.com/v1' : '例如 https://api.anthropic.com'}
+          hint={
+            { openai: '例如 https://api.openai.com/v1', anthropic: '例如 https://api.anthropic.com', gemini: '例如 https://generativelanguage.googleapis.com（不用带 /v1beta）' }[provider.protocol]
+          }
         >
           <Input value={provider.base_url} onChange={(e) => set('base_url', e.target.value)} />
         </Field>

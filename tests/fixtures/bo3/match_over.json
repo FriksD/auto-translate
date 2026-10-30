@@ -1,0 +1,278 @@
+{
+ "id": 132142,
+ "slug": "fnatic-vs-mibr-29-10-2026",
+ "round_id": 41033,
+ "team1_id": 786,
+ "team2_id": 755,
+ "winner_team_id": 786,
+ "loser_team_id": 755,
+ "tournament_id": 6103,
+ "team1_score": 2,
+ "team2_score": 0,
+ "status": "finished",
+ "bo_type": 3,
+ "start_date": "2026-10-29T16:30:00.000+00:00",
+ "end_date": "2026-10-29T18:09:54.000+00:00",
+ "stage_id": 11028,
+ "maps_score": [
+  true,
+  true,
+  false
+ ],
+ "parsed_status": "done",
+ "tier": "a",
+ "tier_rank": 2,
+ "position": 2,
+ "team1_last_game_score": null,
+ "team2_last_game_score": null,
+ "live_updates": null,
+ "points": null,
+ "rating": 0.6795918367346938,
+ "stars": 3,
+ "live_coverage": false,
+ "live_coverage_advantage": false,
+ "live_coverage_source": null,
+ "discipline_id": 1,
+ "prev_match1_winner": false,
+ "prev_match2_winner": false,
+ "prev_match1_id": null,
+ "prev_match2_id": null,
+ "game_version": 2,
+ "team1_new_participant": false,
+ "team2_new_participant": false,
+ "comments_count": 0,
+ "team1": {
+  "id": 786,
+  "slug": "fnatic",
+  "name": "fnatic",
+  "team_clans": [
+   {
+    "clan_name": "FNATIC"
+   },
+   {
+    "clan_name": "Fnatic"
+   },
+   {
+    "clan_name": "Fnatic CSGO"
+   },
+   {
+    "clan_name": "fnatic"
+   }
+  ]
+ },
+ "team2": {
+  "id": 755,
+  "slug": "mibr",
+  "name": "MIBR",
+  "team_clans": [
+   {
+    "clan_name": "MIBR"
+   },
+   {
+    "clan_name": "MIBR!LOS"
+   },
+   {
+    "clan_name": "MIBR-"
+   },
+   {
+    "clan_name": "MIBR_CS2"
+   },
+   {
+    "clan_name": "Made In Brazil"
+   },
+   {
+    "clan_name": "Made in Brazil"
+   },
+   {
+    "clan_name": "made in brazil"
+   },
+   {
+    "clan_name": "mibr"
+   },
+   {
+    "clan_name": "mibr - Made in Brazil"
+   },
+   {
+    "clan_name": "mibr-"
+   }
+  ]
+ },
+ "winner_team": {
+  "id": 786,
+  "name": "fnatic"
+ },
+ "round": {
+  "id": 41033,
+  "name": "Upper bracket final",
+  "round_index": 5,
+  "start_at": "2026-10-29T16:00:00.000+00:00",
+  "stage_id": 11028,
+  "bracket_type": "upper",
+  "is_decider": false,
+  "created_at": "2026-10-15T17:01:48.567+00:00",
+  "updated_at": "2026-10-15T17:01:48.567+00:00",
+  "discipline_id": 1
+ },
+ "stage": {
+  "id": 11028,
+  "title": "Stake Ranked Episode 5 Playoffs",
+  "tournament_id": 6103
+ },
+ "tournament": {
+  "id": 6103,
+  "slug": "stake-ranked-episode-5",
+  "name": "Stake Ranked Episode 5"
+ },
+ "match_maps": [],
+ "streams": [
+  {
+   "name": "Bandurka",
+   "raw_url": "https://www.twitch.tv/bandurka",
+   "official": false,
+   "language": "ru",
+   "viewers_number": 1560,
+   "platform": 1
+  },
+  {
+   "name": "Cosiq",
+   "raw_url": "https://kick.com/cosiq",
+   "official": false,
+   "language": "pt",
+   "viewers_number": 547,
+   "platform": 3
+  },
+  {
+   "name": "starladder",
+   "raw_url": "https://kick.com/starladder",
+   "official": true,
+   "language": "en",
+   "viewers_number": 460,
+   "platform": 3
+  },
+  {
+   "name": "watchfulTV",
+   "raw_url": "https://kick.com/watchfultv",
+   "official": false,
+   "language": "ru",
+   "viewers_number": 394,
+   "platform": 3
+  },
+  {
+   "name": "DiogodFPS",
+   "raw_url": "https://kick.com/diogodfps",
+   "official": false,
+   "language": "pt",
+   "viewers_number": 36,
+   "platform": 3
+  },
+  {
+   "name": "geemz",
+   "raw_url": "https://kick.com/geemz",
+   "official": false,
+   "language": "es",
+   "viewers_number": 15,
+   "platform": 3
+  },
+  {
+   "name": "peacemaker",
+   "raw_url": "https://kick.com/peacemaker",
+   "official": false,
+   "language": "pt",
+   "viewers_number": 11,
+   "platform": 3
+  },
+  {
+   "name": "NarodCast",
+   "raw_url": "https://kick.com/narodcast",
+   "official": false,
+   "language": "ru",
+   "viewers_number": 10,
+   "platform": 3
+  },
+  {
+   "name": "Bandurka",
+   "raw_url": "https://kick.com/bandurka",
+   "official": false,
+   "language": "ru",
+   "viewers_number": 2,
+   "platform": 3
+  },
+  {
+   "name": "Albi1985",
+   "raw_url": "https://kick.com/albi1985",
+   "official": false,
+   "language": "de",
+   "viewers_number": 2,
+   "platform": 3
+  },
+  {
+   "name": "1cen1ce116",
+   "raw_url": "https://www.twitch.tv/1cen1ce116",
+   "official": true,
+   "language": "ru",
+   "viewers_number": 0,
+   "platform": 1
+  },
+  {
+   "name": "Piaskes",
+   "raw_url": "https://kick.com/piaskes",
+   "official": true,
+   "language": "pl",
+   "viewers_number": null,
+   "platform": 3
+  }
+ ],
+ "vods": [],
+ "games": [
+  {
+   "id": 190345,
+   "begin_at": "2026-10-29T17:28:01.000+00:00",
+   "state": "done",
+   "partially_state": null,
+   "status": "finished",
+   "map_name": "de_mirage",
+   "number": 2,
+   "rounds_count": 20,
+   "ov_index": 0,
+   "winner_clan_score": 13,
+   "loser_clan_score": 7,
+   "winner_clan_name": "Fnatic",
+   "loser_clan_name": "MIBR",
+   "match_id": 132142,
+   "game_version": 2,
+   "winner_team_clan": {
+    "team_id": 786,
+    "clan_name": "Fnatic"
+   },
+   "loser_team_clan": {
+    "team_id": 755,
+    "clan_name": "MIBR"
+   }
+  },
+  {
+   "id": 190346,
+   "begin_at": "2026-10-29T16:29:14.000+00:00",
+   "state": "done",
+   "partially_state": null,
+   "status": "finished",
+   "map_name": "de_ancient",
+   "number": 1,
+   "rounds_count": 22,
+   "ov_index": 0,
+   "winner_clan_score": 13,
+   "loser_clan_score": 9,
+   "winner_clan_name": "Fnatic",
+   "loser_clan_name": "MIBR",
+   "match_id": 132142,
+   "game_version": 2,
+   "winner_team_clan": {
+    "team_id": 786,
+    "clan_name": "Fnatic"
+   },
+   "loser_team_clan": {
+    "team_id": 755,
+    "clan_name": "MIBR"
+   }
+  }
+ ]
+}

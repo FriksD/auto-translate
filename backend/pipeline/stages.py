@@ -4,6 +4,10 @@
 
 任务目录 data/tasks/<id>/ 下的文件：
   source.*            原始音频/视频（下载或上传）
+  chunks/             直播录音分段（直播任务）
+  live.json           直播环节的运行状态：比分快照、直播源、录制、采访定位结果
+  live_transcript.jsonl  直播滚动转写
+  interview.wav       从直播录音中截取的采访音频（直播任务）
   audio.wav           16kHz 单声道音频（按截取区间裁剪后）
   transcript.json     Whisper 转写结果（含说话人标签）
   clean_en.txt        第一步：英文清洗后的问答稿
@@ -40,6 +44,8 @@ hltv = HLTVClient(browser)
 _whisper = None
 _diarizer = None
 _model_lock = threading.Lock()
+# Whisper 和 pyannote 共用一块 GPU：直播滚动转写和后处理转写不同时进行，避免显存不够
+gpu_lock = threading.Lock()
 
 # 内存中的阶段进度，供界面轮询：task_id → {percent, message, updated_at}
 progress: Dict[int, Dict[str, Any]] = {}
@@ -157,8 +163,10 @@ def stage_ingest(task_id: int) -> None:
     task = _task(task_id)
     settings = db.get_settings()
     if task["source_type"] == "live":
-        raise RuntimeError("直播录制将在第四阶段实现，目前请在「任务信息」里上传采访音频")
-    if task["source_type"] == "url":
+        source = config.task_dir(task_id) / "interview.wav"
+        if not source.exists():
+            raise RuntimeError("还没有截取采访音频：等待自动定位，或在「直播」页手动标注采访起止，也可以直接上传音频")
+    elif task["source_type"] == "url":
         if not task["source_url"]:
             raise RuntimeError("未填写视频链接")
         source = _download(task_id, task["source_url"], settings)
@@ -169,9 +177,9 @@ def stage_ingest(task_id: int) -> None:
         source = Path(task["source_file"])
 
     command = [config.resolve_ffmpeg(settings), "-y", "-hide_banner", "-loglevel", "error", "-i", str(source)]
-    if task["clip_start"] is not None:
+    if task["clip_start"] is not None and task["source_type"] != "live":
         command += ["-ss", str(task["clip_start"])]
-    if task["clip_end"] is not None:
+    if task["clip_end"] is not None and task["source_type"] != "live":
         command += ["-to", str(task["clip_end"])]
     output = config.task_dir(task_id) / "audio.wav"
     command += ["-vn", "-ac", "1", "-ar", "16000", str(output)]
@@ -192,6 +200,17 @@ def _get_whisper(settings: Dict[str, Any]):
         if _whisper is None or not _whisper.matches(cfg["model"], cfg["device"], cfg["compute_type"]):
             _whisper = WhisperService(cfg["model"], cfg["device"], cfg["compute_type"])
         return _whisper
+
+
+def _release_torch_cache() -> None:
+    """
+    说话人分离之后把 PyTorch 缓存的显存还回去。8G 显存上 Whisper 常驻约 4G，pyannote 跑完缓存住 3G 不放，
+    显存接近占满后（Windows 会借用共享内存）下一次 Whisper 转写从 22 秒变成 90 秒。
+    """
+    import torch
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def _get_diarizer(settings: Dict[str, Any]):
@@ -260,14 +279,16 @@ def stage_transcribe(task_id: int) -> None:
 
     cfg = settings["whisper"]
     diarize = settings["diarization"]["enabled"]
-    result = whisper.transcribe(
-        str(audio),
-        language=cfg["language"] or None,
-        progress_callback=on_progress,
-        initial_prompt=prompts.whisper_prompt(names_for_prompt) or None,
-        beam_size=int(cfg.get("beam_size") or 1),
-        word_timestamps=diarize,
-    )
+    set_progress(task_id, None, "等待 GPU（直播转写占用中）...")
+    with gpu_lock:
+        result = whisper.transcribe(
+            str(audio),
+            language=cfg["language"] or None,
+            progress_callback=on_progress,
+            initial_prompt=prompts.whisper_prompt(names_for_prompt) or None,
+            beam_size=int(cfg.get("beam_size") or 1),
+            word_timestamps=diarize,
+        )
     db.add_event(
         task_id,
         f"转写完成：{len(result['segments'])} 段，语言 {result['language']}，设备 {whisper.device}",
@@ -277,7 +298,9 @@ def stage_transcribe(task_id: int) -> None:
     if diarize:
         set_progress(task_id, None, "正在进行说话人分离...")
         try:
-            diarized = _get_diarizer(settings).diarize(str(audio), min_speakers=2, max_speakers=4)
+            with gpu_lock:
+                diarized = _get_diarizer(settings).diarize(str(audio), min_speakers=2, max_speakers=4)
+                _release_torch_cache()
             result["segments"] = split_by_speaker(result["segments"], diarized["segments"])
             db.add_event(
                 task_id,
@@ -293,7 +316,8 @@ def stage_transcribe(task_id: int) -> None:
 
 # ── clean / write ─────────────────────────────────────────────────────────────
 
-def _llm_call(settings: Dict[str, Any], step: str, system: str, user: str) -> str:
+def _llm_call(settings: Dict[str, Any], step: str, system: str, user: str,
+              images: Optional[List[bytes]] = None) -> str:
     step_cfg = settings["llm"][step]
     provider = llm.find_provider(settings, step_cfg.get("provider_id", ""))
     return llm.complete(
@@ -301,6 +325,7 @@ def _llm_call(settings: Dict[str, Any], step: str, system: str, user: str) -> st
         model=step_cfg.get("model", ""),
         temperature=float(settings["llm"].get("temperature", 0.3)),
         proxy=config.proxy_or_none(settings),
+        images=images,
     )
 
 
@@ -409,9 +434,33 @@ def stage_export(task_id: int) -> None:
     export_docx(read_text(task_id, "draft_zh.txt"), workdir / docx_filename(task))
 
 
+def _live_turnaround(task: Dict[str, Any]) -> Optional[str]:
+    """直播任务：采访结束到初稿完成用了多久。"""
+    if task["source_type"] != "live":
+        return None
+    path = config.task_dir(task["id"]) / "live.json"
+    if not path.exists():
+        return None
+    state = json.loads(path.read_text(encoding="utf-8"))
+    interview, recording = state.get("interview"), state.get("recording")
+    if not interview or not recording:
+        return None
+    ended = recording["started_at"] + interview["end"]
+    captured = interview.get("captured_at") or ended
+    if interview.get("source") == "manual" and captured - ended > 3600:
+        # 事后补截的旧录音，"采访结束后多久"没有意义
+        return f"人工补截旧录音，处理用时 {(time.time() - captured) / 60:.1f} 分钟"
+    total = time.time() - ended
+    return (f"采访结束后 {total / 60:.1f} 分钟出初稿"
+            f"（发现并截取用时 {max(0.0, captured - ended) / 60:.1f} 分钟，处理用时 {(time.time() - captured) / 60:.1f} 分钟）")
+
+
 def stage_deliver(task_id: int) -> None:
     task = _task(task_id)
     settings = db.get_settings()
+    turnaround = _live_turnaround(task)
+    if turnaround:
+        db.add_event(task_id, turnaround, stage="deliver")
     if not settings["feishu"].get("enabled"):
         db.add_event(task_id, "未启用飞书，跳过发送", stage="deliver")
         return
@@ -420,6 +469,8 @@ def stage_deliver(task_id: int) -> None:
         raise RuntimeError("没有找到 Word 文件，请从「生成 Word」重跑")
 
     lines = [f"【初稿就绪】{task['title']}"]
+    if turnaround:
+        lines.append(turnaround)
     report_path = config.task_dir(task_id) / "names_report.json"
     if report_path.exists():
         report = json.loads(report_path.read_text(encoding="utf-8"))

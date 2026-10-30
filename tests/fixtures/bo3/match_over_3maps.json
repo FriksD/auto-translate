@@ -1,0 +1,272 @@
+{
+ "id": 132143,
+ "slug": "eternal-fire-vs-astralis-29-10-2026",
+ "round_id": 41034,
+ "team1_id": 1527,
+ "team2_id": 794,
+ "winner_team_id": 1527,
+ "loser_team_id": 794,
+ "tournament_id": 6103,
+ "team1_score": 2,
+ "team2_score": 1,
+ "status": "finished",
+ "bo_type": 3,
+ "start_date": "2026-10-29T18:30:00.000+00:00",
+ "end_date": "2026-10-29T21:09:41.000+00:00",
+ "stage_id": 11028,
+ "maps_score": [
+  false,
+  true,
+  true
+ ],
+ "parsed_status": "done",
+ "tier": "a",
+ "tier_rank": 2,
+ "position": 10,
+ "team1_last_game_score": null,
+ "team2_last_game_score": null,
+ "live_updates": null,
+ "points": null,
+ "rating": 0.5653061224489796,
+ "stars": 3,
+ "live_coverage": false,
+ "live_coverage_advantage": false,
+ "live_coverage_source": null,
+ "discipline_id": 1,
+ "prev_match1_winner": false,
+ "prev_match2_winner": false,
+ "prev_match1_id": null,
+ "prev_match2_id": null,
+ "game_version": 2,
+ "team1_new_participant": false,
+ "team2_new_participant": false,
+ "comments_count": 0,
+ "team1": {
+  "id": 1527,
+  "slug": "eternal-fire",
+  "name": "Eternal Fire",
+  "team_clans": [
+   {
+    "clan_name": " Eternal Fire"
+   },
+   {
+    "clan_name": "ETERNAL FIRE"
+   },
+   {
+    "clan_name": "ETERNAL FIRE CS2"
+   },
+   {
+    "clan_name": "Eternal"
+   },
+   {
+    "clan_name": "Eternal Fire"
+   },
+   {
+    "clan_name": "Eternal Fire CS2 - E"
+   },
+   {
+    "clan_name": "Eternal-Fire"
+   }
+  ]
+ },
+ "team2": {
+  "id": 794,
+  "slug": "astralis",
+  "name": "Astralis",
+  "team_clans": [
+   {
+    "clan_name": "Astralis"
+   },
+   {
+    "clan_name": "Astralis-"
+   }
+  ]
+ },
+ "winner_team": {
+  "id": 1527,
+  "name": "Eternal Fire"
+ },
+ "round": {
+  "id": 41034,
+  "name": "Lower bracket semifinal",
+  "round_index": 6,
+  "start_at": "2026-10-29T18:30:00.000+00:00",
+  "stage_id": 11028,
+  "bracket_type": "lower",
+  "is_decider": false,
+  "created_at": "2026-10-15T17:01:49.417+00:00",
+  "updated_at": "2026-10-15T17:01:49.417+00:00",
+  "discipline_id": 1
+ },
+ "stage": {
+  "id": 11028,
+  "title": "Stake Ranked Episode 5 Playoffs",
+  "tournament_id": 6103
+ },
+ "tournament": {
+  "id": 6103,
+  "slug": "stake-ranked-episode-5",
+  "name": "Stake Ranked Episode 5"
+ },
+ "match_maps": [],
+ "streams": [
+  {
+   "name": "rootthegamer",
+   "raw_url": "https://kick.com/rootthegamer",
+   "official": false,
+   "language": "tr",
+   "viewers_number": 6796,
+   "platform": 3
+  },
+  {
+   "name": "starladder",
+   "raw_url": "https://kick.com/starladder",
+   "official": true,
+   "language": "en",
+   "viewers_number": 460,
+   "platform": 3
+  },
+  {
+   "name": "watchfulTV",
+   "raw_url": "https://kick.com/watchfultv",
+   "official": false,
+   "language": "ru",
+   "viewers_number": 394,
+   "platform": 3
+  },
+  {
+   "name": "arhavalcom",
+   "raw_url": "https://kick.com/arhavalcom",
+   "official": false,
+   "language": "tr",
+   "viewers_number": 134,
+   "platform": 3
+  },
+  {
+   "name": "geemz",
+   "raw_url": "https://kick.com/geemz",
+   "official": false,
+   "language": "es",
+   "viewers_number": 15,
+   "platform": 3
+  },
+  {
+   "name": "NarodCast",
+   "raw_url": "https://kick.com/narodcast",
+   "official": false,
+   "language": "ru",
+   "viewers_number": 10,
+   "platform": 3
+  },
+  {
+   "name": "Bandurka",
+   "raw_url": "https://kick.com/bandurka",
+   "official": false,
+   "language": "ru",
+   "viewers_number": 2,
+   "platform": 3
+  },
+  {
+   "name": "Piaskes",
+   "raw_url": "https://kick.com/piaskes",
+   "official": true,
+   "language": "pl",
+   "viewers_number": null,
+   "platform": 3
+  },
+  {
+   "name": "deeptier_cs",
+   "raw_url": "https://kick.com/deeptier-cs",
+   "official": false,
+   "language": "ru",
+   "viewers_number": null,
+   "platform": 3
+  },
+  {
+   "name": "RAYCS2VN",
+   "raw_url": "https://kick.com/raycs2vn",
+   "official": false,
+   "language": "vi",
+   "viewers_number": null,
+   "platform": 3
+  }
+ ],
+ "vods": [],
+ "games": [
+  {
+   "id": 190347,
+   "begin_at": "2026-10-29T20:25:08.000+00:00",
+   "state": "done",
+   "partially_state": null,
+   "status": "finished",
+   "map_name": "de_cache",
+   "number": 3,
+   "rounds_count": 21,
+   "ov_index": 0,
+   "winner_clan_score": 13,
+   "loser_clan_score": 8,
+   "winner_clan_name": "Eternal Fire",
+   "loser_clan_name": "Astralis",
+   "match_id": 132143,
+   "game_version": 2,
+   "winner_team_clan": {
+    "team_id": 1527,
+    "clan_name": "Eternal Fire"
+   },
+   "loser_team_clan": {
+    "team_id": 794,
+    "clan_name": "Astralis"
+   }
+  },
+  {
+   "id": 190348,
+   "begin_at": "2026-10-29T19:31:34.000+00:00",
+   "state": "done",
+   "partially_state": null,
+   "status": "finished",
+   "map_name": "de_ancient",
+   "number": 2,
+   "rounds_count": 20,
+   "ov_index": 0,
+   "winner_clan_score": 13,
+   "loser_clan_score": 7,
+   "winner_clan_name": "Eternal Fire",
+   "loser_clan_name": "Astralis",
+   "match_id": 132143,
+   "game_version": 2,
+   "winner_team_clan": {
+    "team_id": 1527,
+    "clan_name": "Eternal Fire"
+   },
+   "loser_team_clan": {
+    "team_id": 794,
+    "clan_name": "Astralis"
+   }
+  },
+  {
+   "id": 190349,
+   "begin_at": "2026-10-29T18:28:15.000+00:00",
+   "state": "done",
+   "partially_state": null,
+   "status": "finished",
+   "map_name": "de_dust2",
+   "number": 1,
+   "rounds_count": 23,
+   "ov_index": 0,
+   "winner_clan_score": 13,
+   "loser_clan_score": 10,
+   "winner_clan_name": "Astralis",
+   "loser_clan_name": "Eternal Fire",
+   "match_id": 132143,
+   "game_version": 2,
+   "winner_team_clan": {
+    "team_id": 794,
+    "clan_name": "Astralis"
+   },
+   "loser_team_clan": {
+    "team_id": 1527,
+    "clan_name": "Eternal Fire"
+   }
+  }
+ ]
+}

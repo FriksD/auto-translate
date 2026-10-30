@@ -22,6 +22,11 @@ from backend import app as app_module  # noqa: E402
 from backend import config  # noqa: E402
 from backend.pipeline import stages  # noqa: E402
 
+# 其他测试模块可能先导入了 config，环境变量就不生效了，这里再显式切换一次，绝不碰真实数据
+config.use_data_dir(Path(_TMP))
+stages.browser.profile_dir = Path(_TMP) / "browser-profile"
+assert str(config.DB_PATH).startswith(_TMP), "测试必须使用临时数据目录"
+
 
 class FakeWhisper:
     device = "cpu"
@@ -104,3 +109,22 @@ class PipelineTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GeminiProtocolTest(unittest.TestCase):
+    def test_request_shape_and_thought_parts_skipped(self):
+        from backend import llm
+        seen = {}
+
+        def handler(request):
+            import httpx
+            seen["url"], seen["key"] = str(request.url), request.headers.get("x-goog-api-key")
+            return httpx.Response(200, json={"candidates": [{"content": {"parts": [
+                {"text": "thinking", "thought": True}, {"text": "pong"}]}}]})
+        import httpx
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        provider = {"base_url": "https://example.com/v1beta", "api_key": "k"}
+        text = llm._gemini_complete(client, provider, "models/gemini-x", "sys", "hi", 0.3)
+        self.assertEqual(text, "pong")
+        self.assertEqual(seen["url"], "https://example.com/v1beta/models/gemini-x:generateContent")
+        self.assertEqual(seen["key"], "k")

@@ -1,0 +1,1632 @@
+{
+"results": [
+{
+"id": 132611,
+"slug": "alter-ego-vs-abyssal-30-10-2026",
+"status": "current",
+"start_date": "2026-10-30T03:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 4170,
+"slug": "alter-ego",
+"name": "Alter Ego"
+},
+"team2": {
+"id": 22732,
+"slug": "abyssal",
+"name": "Abyssal"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132612,
+"slug": "nexvoid-vs-flyquest-30-10-2026",
+"status": "current",
+"start_date": "2026-10-30T03:10:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 22560,
+"slug": "nexvoid",
+"name": "NEXVOID"
+},
+"team2": {
+"id": 10398,
+"slug": "flyquest",
+"name": "FlyQuest"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132613,
+"slug": "1150497d02-vs-7382f70bd8-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T06:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 131997,
+"slug": "genone-vs-baks-esports-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T09:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 1406,
+"slug": "genone",
+"name": "GenOne"
+},
+"team2": {
+"id": 2924,
+"slug": "baks-esports",
+"name": "BAKS"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 133019,
+"slug": "lilmix-vs-dark-moon-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T09:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 486,
+"slug": "lilmix",
+"name": "Lilmix"
+},
+"team2": {
+"id": 24014,
+"slug": "dark-moon",
+"name": "Dark Moon"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132732,
+"slug": "gatorian-vs-unity-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T09:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 22738,
+"slug": "gatorian",
+"name": "Gatorian"
+},
+"team2": {
+"id": 3829,
+"slug": "unity",
+"name": "UNiTY"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132683,
+"slug": "kuusamogg-vs-donstu-esports-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T09:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 2868,
+"slug": "kuusamogg",
+"name": "KUUSAMO"
+},
+"team2": {
+"id": 18843,
+"slug": "donstu-esports",
+"name": "DONSTU"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132858,
+"slug": "basement-boys-vs-teletubisie-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T09:00:00.000+00:00",
+"bo_type": 1,
+"tier": "c",
+"team1": {
+"id": 19881,
+"slug": "basement-boys",
+"name": "BASEMENT BOYS"
+},
+"team2": {
+"id": 24977,
+"slug": "teletubisie",
+"name": "Teletubisie"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132859,
+"slug": "natus-vincere-vs-dea63da912-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T10:15:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 787,
+"slug": "natus-vincere",
+"name": "Natus Vincere"
+},
+"team2": null,
+"team1_score": 0,
+"team2_score": null
+},
+{
+"id": 132684,
+"slug": "falcons-force-vs-invicta-dk-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T11:30:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 21012,
+"slug": "falcons-force",
+"name": "Falcons Force"
+},
+"team2": {
+"id": 22420,
+"slug": "invicta-dk",
+"name": "Invicta"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132733,
+"slug": "copenhagen-wolves-vs-gothboiclique-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T11:30:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 9817,
+"slug": "copenhagen-wolves",
+"name": "CPH Wolves"
+},
+"team2": {
+"id": 2913,
+"slug": "gothboiclique",
+"name": "gothboiclique"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132999,
+"slug": "nuclear-tigeres-vs-private-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T12:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 18539,
+"slug": "nuclear-tigeres",
+"name": "Nuclear TigeRES"
+},
+"team2": {
+"id": 25382,
+"slug": "private",
+"name": "PRIVATE"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132251,
+"slug": "nemiga-vs-vitality-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T12:00:00.000+00:00",
+"bo_type": 3,
+"tier": "s",
+"team1": {
+"id": 655,
+"slug": "nemiga",
+"name": "Nemiga"
+},
+"team2": {
+"id": 667,
+"slug": "vitality",
+"name": "Vitality"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 131998,
+"slug": "fokus-cs-vs-sokerorg-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T12:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 22184,
+"slug": "fokus-cs",
+"name": "FOKUS"
+},
+"team2": {
+"id": 25400,
+"slug": "sokerorg",
+"name": "Sökerorg"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132946,
+"slug": "mellren-vs-megoshort-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T12:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 23102,
+"slug": "mellren",
+"name": "mellren"
+},
+"team2": {
+"id": 1226,
+"slug": "megoshort",
+"name": "megoshort"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132921,
+"slug": "shinden-vs-isurus-gaming-cs-go-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T13:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 11174,
+"slug": "shinden",
+"name": "ShindeN"
+},
+"team2": {
+"id": 591,
+"slug": "isurus-gaming-cs-go",
+"name": "Isurus"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132899,
+"slug": "quintessencia-vs-naocopulas-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T13:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 23217,
+"slug": "quintessencia",
+"name": "QUINTESSÊNCIA"
+},
+"team2": {
+"id": 21686,
+"slug": "naocopulas",
+"name": "NC"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132144,
+"slug": "mibr-vs-eternal-fire-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T13:00:00.000+00:00",
+"bo_type": 3,
+"tier": "a",
+"team1": {
+"id": 755,
+"slug": "mibr",
+"name": "MIBR"
+},
+"team2": {
+"id": 1527,
+"slug": "eternal-fire",
+"name": "Eternal Fire"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132922,
+"slug": "fluxo-vs-signatus-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T13:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 3661,
+"slug": "fluxo",
+"name": "Fluxo"
+},
+"team2": {
+"id": 7623,
+"slug": "signatus",
+"name": "Signatus"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132860,
+"slug": "d3e8e2dfd8-vs-c4b66af85e-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T13:30:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 131999,
+"slug": "betclic-apogee-esports-vs-illyrians-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T15:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 11101,
+"slug": "betclic-apogee-esports",
+"name": "Betclic"
+},
+"team2": {
+"id": 3022,
+"slug": "illyrians",
+"name": "Illyrians"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132252,
+"slug": "mouz-cs2-vs-furia-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T15:00:00.000+00:00",
+"bo_type": 3,
+"tier": "s",
+"team1": {
+"id": 765,
+"slug": "mouz-cs2",
+"name": "MOUZ"
+},
+"team2": {
+"id": 648,
+"slug": "furia",
+"name": "FURIA"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 133000,
+"slug": "pcific-esport-vs-omega-kz-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T15:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 6255,
+"slug": "pcific-esport",
+"name": "PCIFIC"
+},
+"team2": {
+"id": 22014,
+"slug": "omega-kz",
+"name": "Omega"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 133020,
+"slug": "nexus-vs-sinqu-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T15:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 326,
+"slug": "nexus",
+"name": "Nexus"
+},
+"team2": {
+"id": 22190,
+"slug": "sinqu",
+"name": "SINQU"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132942,
+"slug": "l-g-vs-honved-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T15:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 5933,
+"slug": "l-g",
+"name": "Leo"
+},
+"team2": {
+"id": 1279,
+"slug": "honved",
+"name": "Honvéd"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132924,
+"slug": "829ff162f7-vs-7747b3c233-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T16:15:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132923,
+"slug": "abb65b93f6-vs-01aa56d393-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T16:15:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132862,
+"slug": "bc-game-vs-og-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T16:15:00.000+00:00",
+"bo_type": 1,
+"tier": "c",
+"team1": {
+"id": 10844,
+"slug": "bc-game",
+"name": "BC.Game"
+},
+"team2": {
+"id": 395,
+"slug": "og",
+"name": "OG"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132861,
+"slug": "metizport-vs-snitko-esports-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T16:15:00.000+00:00",
+"bo_type": 1,
+"tier": "c",
+"team1": {
+"id": 1578,
+"slug": "metizport",
+"name": "Metizport"
+},
+"team2": {
+"id": 24545,
+"slug": "snitko-esports",
+"name": "SNITKO"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132145,
+"slug": "fnatic-vs-c009bdbd34-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T16:30:00.000+00:00",
+"bo_type": 5,
+"tier": "a",
+"team1": {
+"id": 786,
+"slug": "fnatic",
+"name": "fnatic"
+},
+"team2": null,
+"team1_score": 0,
+"team2_score": null
+},
+{
+"id": 132904,
+"slug": "low-cortisol-br-vs-alka-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T16:30:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 25343,
+"slug": "low-cortisol-br",
+"name": "Low Cortisol BR"
+},
+"team2": {
+"id": 23043,
+"slug": "alka",
+"name": "ALKA"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132770,
+"slug": "ducks-vs-aurora-young-blood-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T16:30:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 25573,
+"slug": "ducks",
+"name": "Ducks"
+},
+"team2": {
+"id": 6024,
+"slug": "aurora-young-blood",
+"name": "Aurora Young Blud"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 133023,
+"slug": "regnum4games-vs-hermine-esports-club-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T17:00:00.000+00:00",
+"bo_type": 1,
+"tier": "c",
+"team1": {
+"id": 11165,
+"slug": "regnum4games",
+"name": "regnum4games"
+},
+"team2": {
+"id": 20702,
+"slug": "hermine-esports-club",
+"name": "Hermine"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 133027,
+"slug": "hunters-rising-vs-gremio-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T17:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 20703,
+"slug": "hunters-rising",
+"name": "Hunters Rising"
+},
+"team2": {
+"id": 24856,
+"slug": "gremio",
+"name": "Grêmio"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 133022,
+"slug": "the-chosen-few-vs-spirit-hu-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T17:00:00.000+00:00",
+"bo_type": 1,
+"tier": "c",
+"team1": {
+"id": 3629,
+"slug": "the-chosen-few",
+"name": "The Chosen Few"
+},
+"team2": {
+"id": 25057,
+"slug": "spirit-hu",
+"name": "Spirit HU"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132864,
+"slug": "818121f2a5-vs-913049b88d-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T17:30:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132863,
+"slug": "c976172afa-vs-fb27539bd6-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T17:30:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 133024,
+"slug": "b8-academy-vs-banger-gang-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T17:30:00.000+00:00",
+"bo_type": 1,
+"tier": "c",
+"team1": {
+"id": 21936,
+"slug": "b8-academy",
+"name": "B8 Academy"
+},
+"team2": {
+"id": 9728,
+"slug": "banger-gang",
+"name": "Banger Gang"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132000,
+"slug": "phantom-esports-vs-lavked-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T18:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 19204,
+"slug": "phantom-esports",
+"name": "Phantom"
+},
+"team2": {
+"id": 23078,
+"slug": "lavked",
+"name": "Lavked"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 133021,
+"slug": "wingman-vs-azuolas-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T18:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 11050,
+"slug": "wingman",
+"name": "Wingman"
+},
+"team2": {
+"id": 25247,
+"slug": "azuolas",
+"name": "Azuolas"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132947,
+"slug": "spirit-academy-vs-falcons-force-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T18:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 1309,
+"slug": "spirit-academy",
+"name": "Spirit Academy"
+},
+"team2": {
+"id": 21012,
+"slug": "falcons-force",
+"name": "Falcons Force"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 133025,
+"slug": "banger-gang-vs-enrage-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T19:00:00.000+00:00",
+"bo_type": 1,
+"tier": "c",
+"team1": {
+"id": 9728,
+"slug": "banger-gang",
+"name": "Banger Gang"
+},
+"team2": {
+"id": 420,
+"slug": "enrage",
+"name": "ENRAGE"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132771,
+"slug": "spirit-academy-black-vs-ttg-esports-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T19:15:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 21815,
+"slug": "spirit-academy-black",
+"name": "Spirit Academy Black"
+},
+"team2": {
+"id": 25421,
+"slug": "ttg-esports",
+"name": "TTG Esports"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132926,
+"slug": "bestia-vs-bth-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T19:30:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 5701,
+"slug": "bestia",
+"name": "BESTIA"
+},
+"team2": {
+"id": 1570,
+"slug": "bth",
+"name": "BTH"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 133026,
+"slug": "mtx-spain-vs-fortress-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T19:30:00.000+00:00",
+"bo_type": 1,
+"tier": "c",
+"team1": {
+"id": 24948,
+"slug": "mtx-spain",
+"name": "MTX"
+},
+"team2": {
+"id": 22418,
+"slug": "fortress",
+"name": "Fortress"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132927,
+"slug": "wildcard-gaming-vs-hacha-esports-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T19:30:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 6062,
+"slug": "wildcard-gaming",
+"name": "Wildcard"
+},
+"team2": {
+"id": 9764,
+"slug": "hacha-esports",
+"name": "Hacha"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132900,
+"slug": "imperial-vs-pain-gaming-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T20:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 1430,
+"slug": "imperial",
+"name": "Imperial"
+},
+"team2": {
+"id": 637,
+"slug": "pain-gaming",
+"name": "paiN"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132865,
+"slug": "3338b58011-vs-a682e0f911-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T20:45:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132929,
+"slug": "c20e638af9-vs-9e8bccc2b4-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T22:45:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132928,
+"slug": "79e99b3c9b-vs-14a5562108-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T22:45:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132905,
+"slug": "dendele-cs-vs-turma-do-pagode-30-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-30T23:30:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 24956,
+"slug": "dendele-cs",
+"name": "DENDELE"
+},
+"team2": {
+"id": 4122,
+"slug": "turma-do-pagode",
+"name": "Turma do Pagode"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132614,
+"slug": "eec0aaf750-vs-6ddbd5ed4e-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T03:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132615,
+"slug": "c5d86b9ae7-vs-c9ed45092c-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T06:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132253,
+"slug": "6b2ffe339e-vs-5aa28c7620-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T08:00:00.000+00:00",
+"bo_type": 3,
+"tier": "s",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132001,
+"slug": "9ine-vs-3eb1c35952-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T09:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 495,
+"slug": "9ine",
+"name": "9INE"
+},
+"team2": null,
+"team1_score": 0,
+"team2_score": null
+},
+{
+"id": 132949,
+"slug": "psychoface-vs-donstu-esports-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T09:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 23234,
+"slug": "psychoface",
+"name": "PsychoFace"
+},
+"team2": {
+"id": 18843,
+"slug": "donstu-esports",
+"name": "DONSTU"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132680,
+"slug": "vexar-vs-esuba-cs-go-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T09:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 10088,
+"slug": "vexar",
+"name": "Vexar"
+},
+"team2": {
+"id": 1199,
+"slug": "esuba-cs-go",
+"name": "eSuba"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132734,
+"slug": "b9b5d2cf58-vs-8030dac879-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T09:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132866,
+"slug": "6eda667e96-vs-ada084a280-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T10:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132254,
+"slug": "467321a5be-vs-6655e4f667-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T11:00:00.000+00:00",
+"bo_type": 5,
+"tier": "s",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132685,
+"slug": "7eb81e0d55-vs-b9956af2b0-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T11:30:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132002,
+"slug": "spirit-academy-vs-af4fb20af4-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T12:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 1309,
+"slug": "spirit-academy",
+"name": "Spirit Academy"
+},
+"team2": null,
+"team1_score": 0,
+"team2_score": null
+},
+{
+"id": 133001,
+"slug": "4036536f21-vs-6033bce370-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T12:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132950,
+"slug": "saint-sinners-vs-misa-esports-cs-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T12:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 25223,
+"slug": "saint-sinners",
+"name": "Saint Sinners"
+},
+"team2": {
+"id": 20952,
+"slug": "misa-esports-cs",
+"name": "Misa"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132920,
+"slug": "galorys-cs-vs-procyon-gaming-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T13:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 10049,
+"slug": "galorys-cs",
+"name": "Galorys"
+},
+"team2": {
+"id": 898,
+"slug": "procyon-gaming",
+"name": "Procyon"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132867,
+"slug": "999677af55-vs-b8999b1d78-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T13:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132915,
+"slug": "bounty-hunters-esports-vs-barca-br-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T13:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 6282,
+"slug": "bounty-hunters-esports",
+"name": "Bounty Hunters"
+},
+"team2": {
+"id": 25580,
+"slug": "barca-br",
+"name": "BARCA"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132901,
+"slug": "5b38800993-vs-2ef6207e17-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T13:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132003,
+"slug": "butterfly-vs-acend-cs2-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T15:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": {
+"id": 24855,
+"slug": "butterfly",
+"name": "Butterfly"
+},
+"team2": {
+"id": 21980,
+"slug": "acend-cs2",
+"name": "Acend"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 133002,
+"slug": "6de8174c1d-vs-718cea09af-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T15:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132954,
+"slug": "sokerorg-vs-fortress-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T15:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 25400,
+"slug": "sokerorg",
+"name": "Sökerorg"
+},
+"team2": {
+"id": 22418,
+"slug": "fortress",
+"name": "Fortress"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132868,
+"slug": "78ad9eeadd-vs-a3ddea16f1-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T16:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132930,
+"slug": "b0d36dccb1-vs-f44f01d176-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T16:15:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132925,
+"slug": "1618fb6891-vs-a733d04ecd-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T16:15:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132906,
+"slug": "1cf01d18dc-vs-647023ddfc-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T16:30:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132772,
+"slug": "monte-vs-prodigy-ru-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T16:30:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 3581,
+"slug": "monte",
+"name": "Monte"
+},
+"team2": {
+"id": 25586,
+"slug": "prodigy-ru",
+"name": "prodigy"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132004,
+"slug": "7907dbf6e2-vs-076c9fb0f3-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T18:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132955,
+"slug": "azuolas-vs-illyrians-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T18:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 25247,
+"slug": "azuolas",
+"name": "Azuolas"
+},
+"team2": {
+"id": 3022,
+"slug": "illyrians",
+"name": "Illyrians"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132869,
+"slug": "5b3d41cb2a-vs-b0380f2785-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T19:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132773,
+"slug": "c79b7172eb-vs-733f3c1e6e-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T19:15:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132931,
+"slug": "5da73694e6-vs-2fb4df5690-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T19:30:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132932,
+"slug": "12c6090646-vs-bc907ef66b-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T19:30:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132907,
+"slug": "6f21d7b93a-vs-3515f9bc1c-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T20:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132933,
+"slug": "f01e0bdabe-vs-172216b530-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T22:45:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132934,
+"slug": "55ddbbab2e-vs-8f9381fa62-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T22:45:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132908,
+"slug": "d8e211de95-vs-7a15e2752a-31-10-2026",
+"status": "upcoming",
+"start_date": "2026-10-31T23:30:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132616,
+"slug": "6993c5ec60-vs-4f87e8d3ed-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T03:00:00.000+00:00",
+"bo_type": 5,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132670,
+"slug": "eternal-premium-vs-maybe-ukr-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T09:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 18841,
+"slug": "eternal-premium",
+"name": "eternal premium"
+},
+"team2": {
+"id": 24681,
+"slug": "maybe-ukr",
+"name": "MAYBE"
+},
+"team1_score": 0,
+"team2_score": 0
+},
+{
+"id": 132951,
+"slug": "9eb3209ccf-vs-ec02185308-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T09:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132735,
+"slug": "adf6421d4d-vs-da8fd1b225-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T09:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132870,
+"slug": "e747f72805-vs-15149c5404-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T10:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132005,
+"slug": "53cff867b8-vs-97704ceb0f-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T11:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132675,
+"slug": "ryvex-vs-ea392cb5ab-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T11:30:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": {
+"id": 25028,
+"slug": "ryvex",
+"name": "Ryvex"
+},
+"team2": null,
+"team1_score": 0,
+"team2_score": null
+},
+{
+"id": 132956,
+"slug": "dfdc71285f-vs-718128bc9d-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T12:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132871,
+"slug": "fc8a081ea4-vs-9116192c21-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T13:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132935,
+"slug": "fe48d1d6a5-vs-b21814df39-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T14:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132006,
+"slug": "d1d551cb67-vs-2277ad0c40-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T14:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132909,
+"slug": "d9df24e3b2-vs-0851c76c99-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T15:00:00.000+00:00",
+"bo_type": 3,
+"tier": "b",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132952,
+"slug": "39e895a33e-vs-2f1aa9aecc-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T15:00:00.000+00:00",
+"bo_type": 3,
+"tier": "c",
+"team1": null,
+"team2": null,
+"team1_score": null,
+"team2_score": null
+},
+{
+"id": 132779,
+"slug": "growth-lab-esports-vs-honved-01-11-2026",
+"status": "upcoming",
+"start_date": "2026-11-01T15:30:00.000+00:00",
+"bo_type": 1,
+"tier": "c",
+"team1": {
+"id": 25600,
+"slug": "growth-lab-esports",
+"name": "Growth Lab Esports"
+},
+"team2": {
+"id": 1279,
+"slug": "honved",
+"name": "Honvéd"
+},
+"team1_score": 0,
+"team2_score": 0
+}
+]
+}

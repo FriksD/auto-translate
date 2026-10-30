@@ -44,6 +44,14 @@ function StepPicker({
   )
 }
 
+function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+  return (
+    <Field label={label}>
+      <Input type="number" min="0" value={value} onChange={(e) => onChange(Number(e.target.value))} />
+    </Field>
+  )
+}
+
 export function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [saving, setSaving] = useState(false)
@@ -59,7 +67,7 @@ export function SettingsPage() {
     return error ? <ErrorText>{error}</ErrorText> : <Loader2 className="mx-auto mt-20 h-6 w-6 animate-spin" />
   }
 
-  type Section = 'hltv' | 'whisper' | 'diarization' | 'llm' | 'feishu'
+  type Section = 'hltv' | 'whisper' | 'diarization' | 'llm' | 'live' | 'feishu'
   const patch = <K extends Section>(key: K, value: Partial<Settings[K]>) =>
     setSettings({ ...settings, [key]: { ...settings[key], ...value } })
 
@@ -108,7 +116,7 @@ export function SettingsPage() {
             label="HLTV 浏览器使用无头模式"
           />
           <p className="text-xs text-muted-foreground">
-            默认会弹出一个 Chrome 窗口访问 HLTV（空闲 10 分钟自动关闭）。遇到需要人工点击的 Cloudflare 验证时会发飞书提醒，在该窗口里点一下即可；无头模式下无法人工验证。
+            默认会弹出一个 Chrome 窗口访问 HLTV（空闲 10 分钟自动关闭），Cloudflare 验证一般 20 秒左右自动通过；偶尔需要人工点击时会发飞书提醒。无头模式下无法人工验证。
           </p>
         </div>
       </Card>
@@ -134,6 +142,13 @@ export function SettingsPage() {
               step={settings.llm.write}
               settings={settings}
               onChange={(write) => patch('llm', { write })}
+            />
+            <StepPicker
+              label="直播采访定位"
+              hint="录制期间每 30 秒判断一次采访起止，响应越快越早出稿；不选则沿用英文清洗的设置"
+              step={settings.llm.detect}
+              settings={settings}
+              onChange={(detect) => patch('llm', { detect })}
             />
             <Field label="Temperature" className="max-w-[200px]">
               <Input
@@ -203,6 +218,64 @@ export function SettingsPage() {
               </Field>
             </div>
           )}
+        </div>
+      </Card>
+
+      <Card>
+        <CardTitle>直播监视与录制</CardTitle>
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            决胜图（任一方再赢一张图就赢下整场）按领先方回合数提高检查频率，达到「开始录制」的分数时开始录官方直播；
+            数据源没有回合比分时（bo3.gg 的普通比赛），决胜图一开打就开始录。
+          </p>
+          <Field
+            label="比分数据源"
+            hint="前一个读取失败时自动换下一个。bo3.gg 是公开接口，不需要浏览器；HLTV 有实时回合比分，但偶尔要过 Cloudflare 验证。"
+            className="max-w-md"
+          >
+            <Select value={settings.live.sources.join(',')} onChange={(e) => patch('live', { sources: e.target.value.split(',') })}>
+              <option value="bo3,hltv">bo3.gg 优先，失败时用 HLTV</option>
+              <option value="hltv,bo3">HLTV 优先，失败时用 bo3.gg</option>
+              <option value="bo3">只用 bo3.gg</option>
+              <option value="hltv">只用 HLTV</option>
+            </Select>
+          </Field>
+          <div className="grid gap-4 md:grid-cols-4">
+            <NumberField label="开赛前开始监视（分钟）" value={settings.live.pre_match_minutes} onChange={(pre_match_minutes) => patch('live', { pre_match_minutes })} />
+            <NumberField label="领先方达到几分改为中频" value={settings.live.mid_at} onChange={(mid_at) => patch('live', { mid_at })} />
+            <NumberField label="领先方达到几分改为高频" value={settings.live.late_at} onChange={(late_at) => patch('live', { late_at })} />
+            <NumberField label="领先方达到几分开始录制" value={settings.live.record_at} onChange={(record_at) => patch('live', { record_at })} />
+          </div>
+          <NumberField
+            label="没有回合比分时，决胜图开打几分钟后录制"
+            value={settings.live.no_score_record_minutes}
+            onChange={(no_score_record_minutes) => patch('live', { no_score_record_minutes })}
+          />
+          <div className="grid gap-4 md:grid-cols-4">
+            {(['idle', 'mid', 'late', 'recording'] as const).map((key) => (
+              <NumberField
+                key={key}
+                label={{ idle: '低频间隔（秒）', mid: '中频间隔（秒）', late: '高频/加时间隔（秒）', recording: '录制中间隔（秒）' }[key]}
+                value={settings.live.intervals[key]}
+                onChange={(v) => patch('live', { intervals: { ...settings.live.intervals, [key]: v } })}
+              />
+            ))}
+          </div>
+          <div className="grid gap-4 md:grid-cols-4">
+            <NumberField label="录音分段（秒）" value={settings.live.chunk_seconds} onChange={(chunk_seconds) => patch('live', { chunk_seconds })} />
+            <NumberField label="抽帧间隔（秒，0 = 只录音）" value={settings.live.frame_interval} onChange={(frame_interval) => patch('live', { frame_interval })} />
+            <NumberField label="采访判断间隔（秒）" value={settings.live.detect_interval} onChange={(detect_interval) => patch('live', { detect_interval })} />
+            <NumberField label="采访最长（分钟）" value={settings.live.max_interview_minutes} onChange={(max_interview_minutes) => patch('live', { max_interview_minutes })} />
+            <NumberField label="截取前后余量（秒）" value={settings.live.padding_seconds} onChange={(padding_seconds) => patch('live', { padding_seconds })} />
+          </div>
+          <div className="grid gap-4 md:grid-cols-4">
+            <NumberField label="赛后多久无采访就提醒（分钟）" value={settings.live.alert_no_interview_minutes} onChange={(alert_no_interview_minutes) => patch('live', { alert_no_interview_minutes })} />
+            <NumberField label="赛后多久无采访就停止（分钟）" value={settings.live.max_post_match_minutes} onChange={(max_post_match_minutes) => patch('live', { max_post_match_minutes })} />
+            <NumberField label="采访结束后多久没出稿就提醒（分钟）" value={settings.live.draft_deadline_minutes} onChange={(draft_deadline_minutes) => patch('live', { draft_deadline_minutes })} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            时效：录音分段和判断间隔越短，采访结束后越快被发现（默认 30 秒 / 30 秒，实测约 2 分钟内截取），后处理约 1～3 分钟。
+          </p>
         </div>
       </Card>
 

@@ -47,6 +47,17 @@ class HLTVClient:
         )
         return {**match, "id": match_id, "url": f"{HLTV}/matches/{match_id}/match"}
 
+    async def watch_match(self, match_id: int, reload: bool = False) -> Dict[str, Any]:
+        """读取监视标签页里的比赛页（含实时比分板），不经过缓存。"""
+        url = f"{HLTV}/matches/{match_id}/match"
+        html, loaded_at = await self.fetcher.watch(f"match:{match_id}", url, reload)
+        match = hltv_parse.parse_match(html)
+        return {**match, "id": match_id, "url": url,
+                "scoreboard": hltv_parse.parse_scoreboard(html), "loaded_at": loaded_at}
+
+    async def unwatch_match(self, match_id: int) -> None:
+        await self.fetcher.unwatch(f"match:{match_id}")
+
     async def get_team(self, team_id: int, refresh: bool = False) -> Dict[str, Any]:
         team = await self._cached(
             f"team:{team_id}", TTL_TEAM, f"{HLTV}/team/{team_id}/team", hltv_parse.parse_team, refresh

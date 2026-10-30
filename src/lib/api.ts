@@ -52,6 +52,69 @@ export interface Stream {
   country: string
   viewers: number | null
   url: string
+  source?: 'hltv' | 'bo3' | 'memory'
+}
+
+export interface MapResult {
+  name: string
+  team1_score: number | null
+  team2_score: number | null
+  picked_by: string | null
+  status?: 'finished' | 'live' | 'upcoming'
+  winner?: 1 | 2 | null
+}
+
+export interface LiveLine {
+  start: number
+  end: number
+  text: string
+}
+
+export interface LiveStatus {
+  snapshot?: {
+    status: 'upcoming' | 'live' | 'over'
+    best_of: number
+    map_wins: number[]
+    live: { map: string; round: number | null; team1: number; team2: number; source: string } | null
+    deciding: boolean
+    overtime: boolean
+    interval: number
+    reason: string
+    should_record: boolean
+    summary: string
+    maps: MapResult[]
+    checked_at: number
+    next_check_at: number
+    source?: 'bo3' | 'hltv'
+    source_url?: string
+    round_source?: 'hltv' | null
+    failures?: { source: string; error: string }[]
+  }
+  source_ids?: { bo3?: { slug: string; swapped: boolean } }
+  source_down_since?: number | null
+  streams?: Stream[]
+  stream?: Partial<Stream> & { url: string }
+  recording?: { started_at: number; active: boolean; stopped_at?: number }
+  match_over_at?: number
+  /** 画面识别出的采访镜头段（相对录制开始的秒数） */
+  shot_runs?: { start: number; end: number; open: boolean }[]
+  frame_count?: number
+  shot_count?: number
+  detection?: {
+    started?: boolean
+    start?: number
+    interviewee?: string | null
+    checked_at?: number
+    pending_end?: number | null
+    failures?: number
+    last?: { started: boolean; ended: boolean; start: string | null; end: string | null; confidence?: number; note?: string }
+  }
+  interview?: { start: number; end: number; source: string; captured_at: number }
+  recording_active: boolean
+  connected: boolean
+  chunk_count: number
+  recorded_seconds: number
+  transcript: LiveLine[]
 }
 
 export interface MatchContext {
@@ -63,7 +126,7 @@ export interface MatchContext {
   status: 'upcoming' | 'live' | 'over'
   score: (number | null)[]
   veto: string[]
-  maps: { name: string; team1_score: number | null; team2_score: number | null; picked_by: string | null }[]
+  maps: MapResult[]
   head_to_head: { team1_wins: number; overtimes: number; team2_wins: number } | null
   streams: Stream[]
 }
@@ -146,7 +209,7 @@ export interface TaskDetail extends Task {
 export interface LlmProvider {
   id: string
   name: string
-  protocol: 'openai' | 'anthropic'
+  protocol: 'openai' | 'anthropic' | 'gemini'
   base_url: string
   api_key: string
   model: string
@@ -168,8 +231,26 @@ export interface Settings {
     providers: LlmProvider[]
     clean: LlmStep
     write: LlmStep
+    detect: LlmStep
     temperature: number
     extra_instructions: string
+  }
+  live: {
+    sources: string[]
+    pre_match_minutes: number
+    intervals: { idle: number; mid: number; late: number; recording: number }
+    mid_at: number
+    late_at: number
+    record_at: number
+    no_score_record_minutes: number
+    chunk_seconds: number
+    frame_interval: number
+    detect_interval: number
+    alert_no_interview_minutes: number
+    max_post_match_minutes: number
+    max_interview_minutes: number
+    padding_seconds: number
+    draft_deadline_minutes: number
   }
   feishu: {
     enabled: boolean
@@ -232,6 +313,18 @@ export const api = {
     request<{ ok: boolean }>('PUT', `/api/tasks/${id}/texts/${name}`, { text }),
   fileUrl: (id: number, name: string) => `/api/tasks/${id}/files/${encodeURIComponent(name)}`,
 
+  liveStatus: (id: number) => request<LiveStatus>('GET', `/api/tasks/${id}/live`),
+  liveCheck: (id: number) => request<{ ok: boolean }>('POST', `/api/tasks/${id}/live/check`),
+  liveRecord: (id: number, stream?: { url: string; name?: string; provider?: string }) =>
+    request<LiveStatus>('POST', `/api/tasks/${id}/live/record`, stream ?? {}),
+  liveCapture: (id: number, start: number, end: number) =>
+    request<Task>('POST', `/api/tasks/${id}/live/capture`, { start, end }),
+  liveNoInterview: (id: number) => request<Task>('POST', `/api/tasks/${id}/live/no-interview`),
+  liveMatchOver: (id: number) => request<Task>('POST', `/api/tasks/${id}/live/match-over`),
+  liveSetSource: (id: number, bo3: string) => request<{ ok: boolean }>('PUT', `/api/tasks/${id}/live/source`, { bo3 }),
+  liveAudioUrl: (id: number, start: number, end: number) =>
+    `/api/tasks/${id}/live/audio?start=${start.toFixed(1)}&end=${end.toFixed(1)}`,
+
   listMatches: (refresh = false) =>
     request<{ fetched_at: number | null; matches: HltvMatch[] }>('GET', `/api/matches?refresh=${refresh}`),
   reserveMatch: (id: number) => request<Task>('POST', `/api/matches/${id}/reserve`, {}),
@@ -267,6 +360,10 @@ export const STATE_COLORS: Record<string, string> = {
   processing: 'bg-blue-100 text-blue-800',
   review: 'bg-amber-100 text-amber-800',
   reserved: 'bg-violet-100 text-violet-800',
+  watching: 'bg-violet-100 text-violet-800',
+  recording: 'bg-rose-100 text-rose-700',
+  interview_detecting: 'bg-rose-100 text-rose-700',
+  no_interview: 'bg-slate-100 text-slate-600',
   done: 'bg-emerald-100 text-emerald-800',
   failed: 'bg-red-100 text-red-700',
   cancelled: 'bg-slate-100 text-slate-500',
@@ -274,6 +371,13 @@ export const STATE_COLORS: Record<string, string> = {
 
 export function isRunning(state: string) {
   return state === 'queued' || state === 'processing'
+}
+
+/** 直播环节（预约 → 监视 → 录制 → 采访监听）中的状态 */
+export const LIVE_STATES = ['reserved', 'watching', 'recording', 'interview_detecting', 'no_interview']
+
+export function isLive(state: string) {
+  return LIVE_STATES.includes(state)
 }
 
 export function formatTime(ts: number) {

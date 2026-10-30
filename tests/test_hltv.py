@@ -40,7 +40,7 @@ class ParseMatchTest(unittest.TestCase):
         self.assertEqual(match["event"]["name"], "IEM Melbourne 2025")
         self.assertEqual([p["name"] for p in match["team1"]["players"]], ["m0NESY", "Magisk", "kyxsan", "NiKo", "TeSeS"])
         self.assertEqual(match["team1"]["players"][0]["real_name"], "Ilya Osipov")
-        self.assertEqual(match["maps"][4], {"name": "Nuke", "team1_score": 20, "team2_score": 22, "picked_by": None})
+        self.assertEqual(match["maps"][4], {"name": "Nuke", "team1_score": 20, "team2_score": 22, "picked_by": None, "status": "finished", "winner": 2})
         self.assertEqual(match["maps"][1]["picked_by"], "Falcons")
         self.assertEqual(match["veto"][-1], "7. Nuke was left over")
         self.assertEqual(match["head_to_head"], {"team1_wins": 0, "overtimes": 1, "team2_wins": 2})

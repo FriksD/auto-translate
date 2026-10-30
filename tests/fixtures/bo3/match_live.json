@@ -1,0 +1,186 @@
+{
+ "id": 132611,
+ "slug": "alter-ego-vs-abyssal-30-10-2026",
+ "round_id": 41219,
+ "team1_id": 4170,
+ "team2_id": 22732,
+ "winner_team_id": null,
+ "loser_team_id": null,
+ "tournament_id": 6150,
+ "team1_score": 0,
+ "team2_score": 0,
+ "status": "current",
+ "bo_type": 3,
+ "start_date": "2026-10-30T03:00:00.000+00:00",
+ "end_date": null,
+ "stage_id": 11075,
+ "maps_score": [
+  true,
+  true,
+  true
+ ],
+ "parsed_status": "waiting",
+ "tier": "b",
+ "tier_rank": 3,
+ "position": 3,
+ "team1_last_game_score": null,
+ "team2_last_game_score": null,
+ "live_updates": null,
+ "points": null,
+ "rating": 0.269949387755102,
+ "stars": 1,
+ "live_coverage": false,
+ "live_coverage_advantage": false,
+ "live_coverage_source": null,
+ "discipline_id": 1,
+ "prev_match1_winner": false,
+ "prev_match2_winner": false,
+ "prev_match1_id": null,
+ "prev_match2_id": null,
+ "game_version": 2,
+ "team1_new_participant": false,
+ "team2_new_participant": false,
+ "comments_count": 0,
+ "team1": {
+  "id": 4170,
+  "slug": "alter-ego",
+  "name": "Alter Ego",
+  "team_clans": [
+   {
+    "clan_name": "AE"
+   },
+   {
+    "clan_name": "ALTER EGO-_-"
+   },
+   {
+    "clan_name": "Alter Ego"
+   },
+   {
+    "clan_name": "AlterEgo-"
+   }
+  ]
+ },
+ "team2": {
+  "id": 22732,
+  "slug": "abyssal",
+  "name": "Abyssal",
+  "team_clans": [
+   {
+    "clan_name": "Abyssal"
+   },
+   {
+    "clan_name": "Team Abyssal"
+   }
+  ]
+ },
+ "winner_team": null,
+ "round": {
+  "id": 41219,
+  "name": "Upper bracket semifinal",
+  "round_index": 1,
+  "start_at": "2026-10-30T00:00:00.000+00:00",
+  "stage_id": 11075,
+  "bracket_type": "upper",
+  "is_decider": false,
+  "created_at": "2026-10-21T13:01:48.992+00:00",
+  "updated_at": "2026-10-21T13:01:48.992+00:00",
+  "discipline_id": 1
+ },
+ "stage": {
+  "id": 11075,
+  "title": "DFRAG Invitational 2026 Playoffs",
+  "tournament_id": 6150
+ },
+ "tournament": {
+  "id": 6150,
+  "slug": "dfrag-invitational-2026",
+  "name": "DFRAG Invitational 2026"
+ },
+ "match_maps": [],
+ "streams": [
+  {
+   "name": "mominpk",
+   "raw_url": "https://kick.com/mominpk",
+   "official": false,
+   "language": "ur",
+   "viewers_number": null,
+   "platform": 3
+  },
+  {
+   "name": "dfragtv_cs2",
+   "raw_url": "https://kick.com/dfragtv_cs2",
+   "official": false,
+   "language": "en",
+   "viewers_number": null,
+   "platform": 3
+  },
+  {
+   "name": "DFragTV",
+   "raw_url": "https://kick.com/dfragtv",
+   "official": false,
+   "language": "en",
+   "viewers_number": null,
+   "platform": 3
+  }
+ ],
+ "vods": [],
+ "games": [
+  {
+   "id": 191106,
+   "begin_at": null,
+   "state": null,
+   "partially_state": null,
+   "status": "upcoming",
+   "map_name": "de_mirage",
+   "number": 3,
+   "rounds_count": null,
+   "ov_index": null,
+   "winner_clan_score": null,
+   "loser_clan_score": null,
+   "winner_clan_name": null,
+   "loser_clan_name": null,
+   "match_id": 132611,
+   "game_version": 2,
+   "winner_team_clan": null,
+   "loser_team_clan": null
+  },
+  {
+   "id": 191107,
+   "begin_at": null,
+   "state": null,
+   "partially_state": null,
+   "status": "upcoming",
+   "map_name": "de_dust2",
+   "number": 2,
+   "rounds_count": null,
+   "ov_index": null,
+   "winner_clan_score": null,
+   "loser_clan_score": null,
+   "winner_clan_name": null,
+   "loser_clan_name": null,
+   "match_id": 132611,
+   "game_version": 2,
+   "winner_team_clan": null,
+   "loser_team_clan": null
+  },
+  {
+   "id": 191108,
+   "begin_at": "2026-10-30T03:03:02.000+00:00",
+   "state": null,
+   "partially_state": null,
+   "status": "current",
+   "map_name": "de_inferno",
+   "number": 1,
+   "rounds_count": null,
+   "ov_index": null,
+   "winner_clan_score": null,
+   "loser_clan_score": null,
+   "winner_clan_name": null,
+   "loser_clan_name": null,
+   "match_id": 132611,
+   "game_version": 2,
+   "winner_team_clan": null,
+   "loser_team_clan": null
+  }
+ ]
+}

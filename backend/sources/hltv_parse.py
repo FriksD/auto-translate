@@ -188,11 +188,18 @@ def parse_match(html: str) -> Dict[str, Any]:
         picked_by = None
         if picked is not None:
             picked_by = teams[0]["name"] if "results-left" in picked.get("class", []) else teams[1]["name"]
+        # 打完的图左右两边带 won/lost；正在打的图是 played 但两边都是 tie（比分不会实时刷新）
+        left = holder.select_one(".results-left")
+        left_classes = left.get("class", []) if left else []
+        played = holder.select_one(".played") is not None
+        winner = 1 if "won" in left_classes else 2 if "lost" in left_classes else None
         maps.append({
             "name": name,
             "team1_score": scores[0] if len(scores) > 0 else None,
             "team2_score": scores[1] if len(scores) > 1 else None,
             "picked_by": picked_by,
+            "status": "finished" if winner else "live" if played else "upcoming",
+            "winner": winner,
         })
 
     lineups = [_parse_lineup(l) for l in soup.select(".lineups .lineup")]
@@ -230,6 +237,7 @@ def parse_match(html: str) -> Dict[str, Any]:
         })
 
     status = "over" if countdown.lower() == "match over" else "live" if countdown.lower() == "live" else "upcoming"
+    best_of = re.search(r"Best of (\d)", format_text)
     return {
         "team1": teams[0],
         "team2": teams[1],
@@ -240,11 +248,32 @@ def parse_match(html: str) -> Dict[str, Any]:
         },
         "status": status,
         "format": format_text,
+        "best_of": int(best_of.group(1)) if best_of else None,
         "veto": veto,
         "maps": maps,
         "past_matches": past,
         "head_to_head": h2h,
         "streams": streams,
+    }
+
+
+def parse_scoreboard(html: str) -> Optional[Dict[str, Any]]:
+    """
+    比赛页的实时比分板（scorebot 通过 websocket 实时更新，页面不用刷新）。
+    返回当前地图、回合数、CT/T 两边的队名和比分；比赛未开始、换图间隙或已结束时没有比分板，返回 None。
+    """
+    board = _soup(html).select_one(".scoreboard")
+    if board is None:
+        return None
+    round_match = re.match(r"(\d+)\s*-\s*(.+)", _text(board.select_one(".currentRoundText")))
+    ct, t = _int(_text(board.select_one(".ctScore"))), _int(_text(board.select_one(".tScore")))
+    if not round_match or ct is None or t is None:
+        return None
+    return {
+        "round": int(round_match.group(1)),
+        "map": round_match.group(2).strip(),
+        "ct": {"team": _text(board.select_one(".ctTeamHeaderBg .teamName")), "score": ct},
+        "t": {"team": _text(board.select_one(".tTeamHeaderBg .teamName")), "score": t},
     }
 
 

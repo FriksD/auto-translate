@@ -2,7 +2,7 @@
 任务状态机与后处理流水线执行器。
 
 状态（state）是任务的粗粒度生命周期；阶段（stage）是 processing 状态下
-流水线正在执行的步骤。所有阶段串行执行（共用一块 GPU），任何阶段都可以
+流水线正在执行的步骤。同一任务的阶段串行执行，直播任务和其他任务分两条车道（见 PipelineRunner），任何阶段都可以
 单独重跑，后续阶段随之重跑。
 """
 import asyncio
@@ -54,12 +54,22 @@ class TaskCancelled(Exception):
 
 
 class PipelineRunner:
+    """
+    两条车道：直播任务单独一条，不会排在上传的长视频后面（采访要尽快出稿）；
+    其余任务一条。两条车道可以同时跑，GPU 步骤由 stages.gpu_lock 串行。
+    """
+    LANES = ("live", "default")
+
     def __init__(self) -> None:
-        self._queue: "asyncio.Queue[Tuple[int, str, Optional[str], str]]" = asyncio.Queue()
-        self._worker: Optional[asyncio.Task] = None
+        self._queues: Dict[str, "asyncio.Queue[Tuple[int, str, Optional[str], str]]"] = {}
+        self._workers: List[asyncio.Task] = []
         self._stage_fns: Dict[str, StageFn] = {}
         self._on_failure: Optional[Callable[[int, str], Awaitable[None]]] = None
-        self.current_task_id: Optional[int] = None
+        self.current: Dict[str, Optional[int]] = {lane: None for lane in self.LANES}
+
+    @property
+    def current_task_id(self) -> Optional[int]:
+        return self.current["live"] or self.current["default"]
 
     def register(self, stage: str, fn: StageFn) -> None:
         if stage not in STAGE_KEYS:
@@ -71,11 +81,13 @@ class PipelineRunner:
 
     def start(self) -> None:
         self._recover_interrupted()
-        self._worker = asyncio.create_task(self._loop())
+        for lane in self.LANES:
+            self._queues[lane] = asyncio.Queue()
+            self._workers.append(asyncio.create_task(self._loop(lane)))
 
     async def stop(self) -> None:
-        if self._worker:
-            self._worker.cancel()
+        for worker in self._workers:
+            worker.cancel()
 
     def enqueue(self, task_id: int, from_stage: str = STAGE_KEYS[0], to_stage: Optional[str] = None) -> None:
         """从 from_stage 开始执行；指定 to_stage 时只执行到该阶段为止，完成后恢复原状态。"""
@@ -93,7 +105,8 @@ class PipelineRunner:
         if to_stage:
             scope += f"，到「{STAGE_LABELS[to_stage]}」为止"
         db.add_event(task_id, f"加入队列，{scope}", stage=from_stage)
-        self._queue.put_nowait((task_id, from_stage, to_stage, task["state"]))
+        lane = "live" if task.get("source_type") == "live" else "default"
+        self._queues[lane].put_nowait((task_id, from_stage, to_stage, task["state"]))
 
     @staticmethod
     def check_cancelled(task_id: int) -> None:
@@ -109,16 +122,18 @@ class PipelineRunner:
                 db.update_task(task["id"], state=State.FAILED, error="服务重启，处理被中断")
                 db.add_event(task["id"], "服务重启，处理被中断，可从当前阶段重试", level="error", stage=task["stage"])
 
-    async def _loop(self) -> None:
+    async def _loop(self, lane: str) -> None:
+        queue = self._queues[lane]
         while True:
-            task_id, from_stage, to_stage, previous_state = await self._queue.get()
+            task_id, from_stage, to_stage, previous_state = await queue.get()
+            self.current[lane] = task_id
             try:
                 await self._run(task_id, from_stage, to_stage, previous_state)
             except Exception:  # 兜底，保证 worker 不退出
                 logger.exception("任务 %s 执行器异常", task_id)
             finally:
-                self.current_task_id = None
-                self._queue.task_done()
+                self.current[lane] = None
+                queue.task_done()
 
     async def _run(self, task_id: int, from_stage: str, to_stage: Optional[str], previous_state: str) -> None:
         task = db.get_task(task_id)
@@ -129,7 +144,6 @@ class PipelineRunner:
             db.add_event(task_id, "已取消", level="warning")
             return
 
-        self.current_task_id = task_id
         db.update_task(task_id, state=State.PROCESSING)
         stage = from_stage
         try:
