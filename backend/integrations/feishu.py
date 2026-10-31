@@ -81,8 +81,8 @@ class FeishuClient:
             ))
         return data["data"]["message_id"]
 
-    def _reply(self, message_id: str, msg_type: str, content: Dict[str, Any]) -> str:
-        """以话题形式回复某条消息：会提醒群成员，但不在主聊天里刷屏。"""
+    def _reply(self, message_id: str, msg_type: str, content: Dict[str, Any], in_thread: bool = True) -> str:
+        """回复某条消息。in_thread：以话题形式回复，会提醒群成员，但不在主聊天里刷屏。"""
         with self._client() as client:
             data = self._check(client.post(
                 f"/im/v1/messages/{message_id}/reply",
@@ -90,7 +90,7 @@ class FeishuClient:
                 json={
                     "msg_type": msg_type,
                     "content": json.dumps(content, ensure_ascii=False),
-                    "reply_in_thread": True,
+                    "reply_in_thread": in_thread,
                 },
             ))
         return data["data"]["message_id"]
@@ -124,8 +124,11 @@ class FeishuClient:
                 json={"content": json.dumps(card, ensure_ascii=False)},
             ))
 
-    def reply_text(self, message_id: str, text: str) -> None:
-        self._reply(message_id, "text", {"text": text})
+    def reply_text(self, message_id: str, text: str, in_thread: bool = True) -> None:
+        self._reply(message_id, "text", {"text": text}, in_thread)
+
+    def reply_card(self, message_id: str, card: Dict[str, Any], in_thread: bool = False) -> str:
+        return self._reply(message_id, "interactive", card, in_thread)
 
     def reply_file(self, message_id: str, path: Path) -> None:
         self._reply(message_id, "file", {"file_key": self._upload_file(path)})

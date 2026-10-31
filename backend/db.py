@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS feishu_cards (
     message_id TEXT,             -- 还没发出时为空
     sent_at REAL,
     digest TEXT,                 -- 上次发出的卡片内容摘要，没变化就不更新
-    rendered_at REAL
+    rendered_at REAL,
+    reserved_by TEXT             -- 在飞书里预约的人（open_id）
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -77,6 +78,7 @@ DEFAULT_ALIASES = [
 # 旧库升级时补上的列：列名 → 定义
 MIGRATIONS = {
     "tasks": {"match_time": "REAL"},
+    "feishu_cards": {"reserved_by": "TEXT"},
 }
 
 TASK_UPDATABLE = {
@@ -215,10 +217,11 @@ def recent_events(task_id: int, limit: int = 20) -> List[Dict[str, Any]]:
 
 # ── 飞书卡片 ──────────────────────────────────────────────────────────────────
 
-def track_card(task_id: int) -> None:
+def track_card(task_id: int, reserved_by: Optional[str] = None) -> None:
     """登记任务需要一张飞书卡片（由卡片服务发出）；已登记的不变。"""
     with _lock:
-        _db().execute("INSERT OR IGNORE INTO feishu_cards (task_id) VALUES (?)", (task_id,))
+        _db().execute("INSERT OR IGNORE INTO feishu_cards (task_id, reserved_by) VALUES (?, ?)",
+                      (task_id, reserved_by))
         _db().commit()
 
 

@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend import config, db
 from backend.config import DEFAULT_SETTINGS
 from backend.integrations import feishu, task_cards
-from backend.integrations.feishu_ws import CardCallbackClient
+from backend.integrations.feishu_ws import FeishuEventClient
 from backend.runner import State
 
 CFG = DEFAULT_SETTINGS["live"]
@@ -87,6 +87,10 @@ class BuildCardTest(unittest.TestCase):
         self.assertIn("Shearer（可能是 sh1ro）", text_of(card))
         self.assertIn("录音 01:00–05:00（自动判定）", text_of(card))
         self.assertEqual(card["header"]["template"], "orange")
+
+    def test_reserved_by_mention(self):
+        card = task_cards.build_card(make_task(State.RESERVED), {}, cfg=CFG, reserved_by="ou_abc")
+        self.assertIn("<at id=ou_abc></at>", text_of(card))
 
     def test_events_skip_pipeline_noise(self):
         events = [{"ts": time.time(), "level": "info", "message": "开始：语音转写"},
@@ -198,20 +202,38 @@ class CardServiceTest(unittest.TestCase):
 class CallbackTest(unittest.TestCase):
     def event(self, value, form=None):
         action = SimpleNamespace(value=value, form_value=form)
-        return SimpleNamespace(event=SimpleNamespace(action=action, operator=SimpleNamespace(open_id="ou_1")))
+        return SimpleNamespace(event=SimpleNamespace(action=action, operator=SimpleNamespace(open_id="ou_1"),
+                                                     context=SimpleNamespace(open_message_id="om_9")))
 
     def test_dispatch_and_toast(self):
         calls = []
-        client = CardCallbackClient(lambda *args: calls.append(args) or "已开始录制")
-        response = client._on_action(self.event({"action": "stream", "task_id": "7"}, {"url": "https://kick.com/x"}))
-        self.assertEqual(calls, [("stream", 7, {"url": "https://kick.com/x"}, "ou_1")])
+        client = FeishuEventClient(lambda *args: calls.append(args) or "已开始录制")
+        value = {"action": "stream", "task_id": 7}
+        response = client._on_action(self.event(value, {"url": "https://kick.com/x"}))
+        self.assertEqual(calls, [(value, {"url": "https://kick.com/x"}, "ou_1", "om_9")])
         self.assertEqual((response.toast.type, response.toast.content), ("success", "已开始录制"))
+
+    def test_no_toast_when_handler_returns_none(self):
+        response = FeishuEventClient(lambda *args: None)._on_action(self.event({"action": "schedule"}))
+        self.assertIsNone(response.toast)
 
     def test_error_toast(self):
         def fail(*_):
             raise RuntimeError("任务正在处理中")
-        response = CardCallbackClient(fail)._on_action(self.event({"action": "record", "task_id": 7}))
+        response = FeishuEventClient(fail)._on_action(self.event({"action": "record", "task_id": 7}))
         self.assertEqual((response.toast.type, response.toast.content), ("error", "任务正在处理中"))
+
+    def test_message_dedup_and_text(self):
+        received = []
+        client = FeishuEventClient(lambda *args: None, received.append)
+        message = SimpleNamespace(message_id="om_1", chat_id="oc_1", chat_type="group", message_type="text",
+                                  content=json.dumps({"text": "@_user_1 赛程 明天"}))
+        sender = SimpleNamespace(sender_type="user", sender_id=SimpleNamespace(open_id="ou_2"))
+        data = SimpleNamespace(event=SimpleNamespace(message=message, sender=sender))
+        client._on_message(data)
+        client._on_message(data)  # 飞书重推
+        self.assertEqual(received, [{"message_id": "om_1", "chat_id": "oc_1", "chat_type": "group",
+                                     "text": "@_user_1 赛程 明天", "sender": "ou_2"}])
 
 
 if __name__ == "__main__":

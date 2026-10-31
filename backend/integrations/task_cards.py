@@ -271,15 +271,17 @@ def _stream_form(task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def build_card(task: Dict[str, Any], state: Dict[str, Any], progress: Optional[Dict[str, Any]] = None,
                events: Optional[List[Dict[str, Any]]] = None, names_report: Optional[Dict[str, Any]] = None,
-               cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+               cfg: Optional[Dict[str, Any]] = None, reserved_by: Optional[str] = None) -> Dict[str, Any]:
     """
     task：db.get_task 的结果；state：live.json（非直播任务为空）；progress：stages.progress 里的阶段进度；
-    events：最近的任务事件；names_report：names_report.json；cfg：settings["live"]。
+    events：最近的任务事件；names_report：names_report.json；cfg：settings["live"]；
+    reserved_by：在飞书里预约的人的 open_id。
     """
     label, template, tag_color = STATE_STYLE.get(task["state"], (task["state"], "grey", "neutral"))
     recording = task["state"] in (State.RECORDING, State.INTERVIEW_DETECTING)
     sections = [
-        [_track_line(step_track(task, state), recording)],
+        [_track_line(step_track(task, state), recording)]
+        + ([f"<font color='grey'>预约人</font> <at id={reserved_by}></at>"] if reserved_by else []),
         _score_lines(task, state) + _detection_lines(state) + _status_lines(task, state, progress, names_report, cfg or {}),
         _event_lines(events or []),
     ]
@@ -347,13 +349,13 @@ def _read_json(path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-def render(task: Dict[str, Any]) -> Dict[str, Any]:
+def render(task: Dict[str, Any], reserved_by: Optional[str] = None) -> Dict[str, Any]:
     from ..pipeline import live, stages
 
     state = live.load_state(task["id"]) if task["source_type"] == "live" else {}
     report = _read_json(config.task_dir(task["id"]) / "names_report.json")
     return build_card(task, state, stages.progress.get(task["id"]), db.recent_events(task["id"], 30), report,
-                      db.get_settings()["live"])
+                      db.get_settings()["live"], reserved_by)
 
 
 class TaskCardService:
@@ -381,10 +383,10 @@ class TaskCardService:
     def wake(self) -> None:
         self._wake.set()
 
-    def track(self, task_id: int) -> None:
-        """这个任务要一张卡片（未启用飞书时不登记）。"""
+    def track(self, task_id: int, reserved_by: Optional[str] = None) -> None:
+        """这个任务要一张卡片（未启用飞书时不登记）。reserved_by：在飞书里预约的人。"""
         if feishu.enabled(db.get_settings()):
-            db.track_card(task_id)
+            db.track_card(task_id, reserved_by)
             self.wake()
 
     def _loop(self) -> None:
@@ -420,7 +422,7 @@ class TaskCardService:
             task = db.get_task(task_id)
             if row is None or task is None:
                 return None
-            card = render(task)
+            card = render(task, row.get("reserved_by"))
             card_digest = digest(card)
             now = time.time()
             message_id = row["message_id"]

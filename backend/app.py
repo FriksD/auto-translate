@@ -21,8 +21,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config, db, llm
-from .integrations import feishu, task_cards
-from .integrations.feishu_ws import CardCallbackClient
+from .integrations import feishu, schedule_card, task_cards
+from .integrations.feishu_ws import FeishuEventClient
 from .integrations.task_cards import cards
 from .pipeline import live, match_sources, stages
 from .pipeline.watcher import MatchWatcher
@@ -534,11 +534,16 @@ class ReserveRequest(BaseModel):
 
 @app.post("/api/matches/{match_id}/reserve")
 async def reserve_match(match_id: int, body: ReserveRequest):
+    return await _reserve(match_id, body.title, body.notes)
+
+
+async def _reserve(match_id: int, title: Optional[str] = None, notes: Optional[str] = None,
+                   reserved_by: Optional[str] = None) -> Dict[str, Any]:
+    """预约比赛。reserved_by：在飞书里预约的人（open_id），显示在进度卡片上。"""
     existing = db.find_task_by_match(match_id)
     if existing:
         raise HTTPException(409, f"这场比赛已经预约过（任务 #{existing['id']}）")
     listed = next((m for m in (await stages.hltv.list_matches()) if m["id"] == match_id), None)
-    title = body.title
     if not title:
         if listed:
             teams = " vs ".join(t["name"] or "TBD" for t in (listed["team1"], listed["team2"]))
@@ -553,10 +558,10 @@ async def reserve_match(match_id: int, body: ReserveRequest):
         match_time=(listed["unix_ms"] / 1000) if listed and listed["unix_ms"] else None,
         team1=(listed["team1"]["name"] or None) if listed else None,
         team2=(listed["team2"]["name"] or None) if listed else None,
-        notes=body.notes,
+        notes=notes,
     )
-    db.add_event(task["id"], "已预约比赛")
-    cards.track(task["id"])
+    db.add_event(task["id"], "已在飞书预约比赛" if reserved_by else "已预约比赛")
+    cards.track(task["id"], reserved_by)
     # 立即抓取背景信息；只跑这一阶段，完成后回到「已预约」
     runner.enqueue(task["id"], "context", "context")
     return db.get_task(task["id"])
@@ -582,11 +587,35 @@ def _stream_provider(url: str) -> Optional[str]:
     return None
 
 
-async def _card_action(action: str, task_id: int, form: Dict[str, Any]) -> str:
+def _aliases() -> Dict[str, str]:
+    return {e["term"]: e["target"] for e in db.list_glossary() if e["kind"] == "alias"}
+
+
+async def _schedule_card(view: Dict[str, Any], refresh: bool = False) -> Dict[str, Any]:
+    data = await list_matches(refresh=refresh)
+    return schedule_card.build_schedule_card(data["matches"], view, _aliases(), data["fetched_at"])
+
+
+async def _update_schedule(message_id: str, view: Dict[str, Any], refresh: bool = False) -> None:
+    card = await _schedule_card(view, refresh)
+    await run_in_threadpool(feishu.client_for(db.get_settings()).update_card, message_id, card)
+
+
+async def _card_action(value: Dict[str, Any], form: Dict[str, Any], operator: str, message_id: str) -> Optional[str]:
     """执行卡片上的按钮，复用对应的接口；失败时抛出 HTTPException。"""
+    action = str(value.get("action") or "")
+    view = value.get("view") or {}
+    if action == "schedule":
+        await _update_schedule(message_id, view, bool(value.get("refresh")))
+        return None
+    if action == "reserve":
+        task = await _reserve(int(value["match_id"]), reserved_by=operator or None)
+        await _update_schedule(message_id, view)
+        return f"已预约 {task['title']}，进度卡片已发到群里"
     label = CARD_ACTIONS.get(action)
     if label is None:
         raise HTTPException(400, f"未知操作：{action}")
+    task_id = int(value.get("task_id"))
     if task_id == task_cards.DEMO_TASK_ID:
         return f"卡片按钮已连通（{label}）"
     task = _require_task(task_id)
@@ -624,18 +653,66 @@ async def _card_action(action: str, task_id: int, form: Dict[str, Any]) -> str:
     return message
 
 
-def _on_card_action(action: str, task_id: int, form: Dict[str, Any], operator: str) -> str:
+def _on_card_action(value: Dict[str, Any], form: Dict[str, Any], operator: str, message_id: str) -> Optional[str]:
     """长连接线程里调用：把操作交给服务的事件循环执行。"""
     if _main_loop is None:
         raise RuntimeError("服务还没启动完成")
-    future = asyncio.run_coroutine_threadsafe(_card_action(action, task_id, form), _main_loop)
+    future = asyncio.run_coroutine_threadsafe(_card_action(value, form, operator, message_id), _main_loop)
     try:
         return future.result(timeout=CARD_ACTION_TIMEOUT)
     except concurrent.futures.TimeoutError:
         return "已提交，卡片稍后更新"
 
 
-card_callbacks = CardCallbackClient(_on_card_action)
+# ── 飞书机器人命令（群里 @机器人 或私聊） ─────────────────────────────────────
+
+def _command_allowed(event: Dict[str, Any], feishu_settings: Dict[str, Any]) -> bool:
+    """只响应配置的那个群和私聊：预约出来的进度卡片都发到配置的群里。"""
+    if event.get("chat_type") == "p2p":
+        return True
+    return feishu_settings.get("receive_id_type") == "chat_id" and event.get("chat_id") == feishu_settings.get("receive_id")
+
+
+async def _handle_command(event: Dict[str, Any]) -> None:
+    settings = db.get_settings()
+    if not feishu.enabled(settings) or not _command_allowed(event, settings["feishu"]):
+        return
+    client = feishu.client_for(settings)
+    message_id = event["message_id"]
+
+    async def reply(text: str) -> None:
+        await run_in_threadpool(client.reply_text, message_id, text, False)
+
+    command, args = schedule_card.parse_command(event.get("text") or "")
+    try:
+        if command == "help":
+            await reply(schedule_card.HELP_TEXT)
+        elif command == "unknown":
+            await reply(f"没看懂「{args['text'][:50]}」\n\n{schedule_card.HELP_TEXT}")
+        elif command == "reserve_url":
+            match_id = hltv_parse.match_id_from_url(args["url"])
+            if not match_id:
+                await reply("无法从链接中识别 HLTV 比赛 ID")
+                return
+            task = await _reserve(match_id, reserved_by=event.get("sender") or None)
+            await reply(f"已预约 {task['title']}，进度卡片已发到群里")
+        else:
+            card = await _schedule_card(args)
+            await run_in_threadpool(client.reply_card, message_id, card)
+    except HTTPException as error:
+        await reply(f"操作失败：{error.detail}")
+    except Exception as error:
+        logger.exception("处理飞书命令出错")
+        await reply(f"操作失败：{error}")
+
+
+def _on_bot_message(event: Dict[str, Any]) -> None:
+    """长连接线程里调用：交给服务的事件循环处理，立即返回。"""
+    if _main_loop is not None:
+        asyncio.run_coroutine_threadsafe(_handle_command(event), _main_loop)
+
+
+card_callbacks = FeishuEventClient(_on_card_action, _on_bot_message)
 
 
 # ── 前端静态资源（npm run build 后生成 dist/） ─────────────────────────────────
