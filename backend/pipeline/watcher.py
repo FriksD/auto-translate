@@ -175,8 +175,8 @@ class MatchWatcher:
             await asyncio.sleep(TICK)
 
     def _should_follow(self, task: Dict[str, Any]) -> bool:
-        if task["source_type"] != "live":
-            return False
+        if task["source_type"] != "live" or task["context"].get("demo"):
+            return False  # 演示任务（回放录好的直播）由回放脚本推进，不读比分
         if task["state"] in WATCH_STATES:
             return True
         if task["state"] in (State.CANCELLED, State.DONE, State.NO_INTERVIEW):

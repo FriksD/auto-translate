@@ -721,7 +721,7 @@ class LiveManager:
     def resume_all(self) -> None:
         """服务重启后，接着录制上次没录完的任务。"""
         for task in db.list_tasks():
-            if task["state"] in LIVE_STATES:
+            if task["state"] in LIVE_STATES and not task["context"].get("demo"):
                 try:
                     self.start(task["id"])
                     db.add_event(task["id"], "服务重启，继续录制", level="warning")
