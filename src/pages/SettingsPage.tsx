@@ -89,7 +89,7 @@ export function SettingsPage() {
     setFeishuResult('发送中...')
     try {
       await api.testFeishu(settings.feishu)
-      setFeishuResult('已发送测试消息，请到飞书查看')
+      setFeishuResult('已发送测试卡片，请到飞书查看；点卡片上的按钮会提示回调是否连通')
     } catch (e) {
       setFeishuResult(`失败：${(e as Error).message}`)
     }
@@ -285,7 +285,7 @@ export function SettingsPage() {
           <Checkbox
             checked={settings.feishu.enabled}
             onChange={(enabled) => patch('feishu', { enabled })}
-            label="初稿完成或处理失败时发送飞书消息"
+            label="在飞书群里为每个任务发一张进度卡片，需要处理的事在卡片下提醒"
           />
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="App ID">
@@ -310,7 +310,7 @@ export function SettingsPage() {
           <div className="flex items-center gap-3">
             <Button size="sm" variant="outline" onClick={testFeishu}>
               <Send className="mr-2 h-4 w-4" />
-              发送测试消息
+              发送测试卡片
             </Button>
             {feishuResult && <span className="text-sm text-muted-foreground">{feishuResult}</span>}
           </div>

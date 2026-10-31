@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .. import config, db
-from ..integrations import feishu
+from ..integrations.task_cards import cards
 from ..runner import State
 from . import prompts
 from .recorder import SAMPLE_RATE, Recorder, chunk_duration, chunk_start, frame_time, read_pcm
@@ -44,6 +44,8 @@ ENDING_TOLERANCE = 45
 ENDING_MARGIN = 60
 # 一直收不到比赛结束信号时，录制最长多久
 MAX_RECORDING_HOURS = 6
+# 人工点「本场无采访」时的原因（不用再提醒）
+MANUAL_NO_INTERVIEW = "人工确认本场无采访"
 
 _state_locks: Dict[int, threading.Lock] = defaultdict(threading.Lock)
 
@@ -377,8 +379,7 @@ class LiveSession:
     def _on_recorder_event(self, level: str, message: str) -> None:
         db.add_event(self.task_id, message, level="error" if level == "error" else level)
         if level == "error":
-            task = db.get_task(self.task_id)
-            self.manager.notify(f"【录制异常】{task['title']}\n{message}，可在任务页换一个直播源\n{self.manager.task_url(self.task_id)}")
+            self.manager.alert(self.task_id, "录制异常", f"{message}，可以在卡片里填一个直播链接换源")
 
     def _on_not_live(self, url: str, connected_at: float) -> Optional[str]:
         """拉到的是回放：丢掉这次连接录到的内容，换下一个候选直播源；没有可换的就停止录制。"""
@@ -392,15 +393,14 @@ class LiveSession:
         task = db.get_task(self.task_id)
         replacement = pick_stream(candidate_streams(task, state))
         message = f"直播源不是直播（下载比实时快，可能是回放），已弃用：{url}"
-        link = self.manager.task_url(self.task_id)
         if replacement:
             patch_state(self.task_id, stream=replacement)
             db.add_event(self.task_id, f"{message}；改录 {replacement.get('name') or ''} {replacement['url']}", level="warning")
-            self.manager.notify(f"【直播源不是直播】{task['title']}\n{url} 可能是回放，已改录 {replacement['url']}，请确认\n{link}")
+            self.manager.alert(self.task_id, "直播源不是直播", f"{url} 可能是回放，已改录 {replacement['url']}，请确认")
             return replacement["url"]
         db.add_event(self.task_id, f"{message}；没有其他可用的直播源，录制已停止，请在任务页填写直播链接", level="error")
-        self.manager.notify(f"【直播源不是直播】{task['title']}\n{url} 可能是回放，没有其他直播源可换，录制已停止，"
-                            f"请在任务页填写直播链接\n{link}")
+        self.manager.alert(self.task_id, "直播源不是直播",
+                           f"{url} 可能是回放，没有其他直播源可换，录制已停止，请在卡片里填写直播链接")
         return None
 
     def _discard_since(self, connected_at: float) -> None:
@@ -551,8 +551,8 @@ class LiveSession:
             mutate_state(self.task_id, lambda s: s.setdefault("detection", {}).update(
                 checked_at=time.time(), failures=failures))
             if failures == LLM_ALERT_FAILURES:
-                self.manager.notify(f"【采访定位失败】{task['title']}\nLLM 已连续 {failures} 次调用失败：{str(error)[:200]}"
-                                    f"\n请检查 LLM 设置，或在任务页手动标注采访起止\n{self.manager.task_url(self.task_id)}")
+                self.manager.alert(self.task_id, "采访定位失败", f"LLM 已连续 {failures} 次调用失败：{str(error)[:200]}"
+                                   f"\n请检查 LLM 设置，或在任务页手动标注采访起止")
             return
 
         start = prompts.parse_clock(answer.get("start"))
@@ -604,8 +604,6 @@ class LiveSession:
         if newly_started:
             who = answer.get("interviewee") or "选手"
             db.add_event(self.task_id, f"检测到采访开始：{who}，约 {prompts.format_timestamp(start)}")
-            self.manager.notify(f"【检测到采访】{task['title']}\n{who}，约在录音 {prompts.format_timestamp(start)} 处开始"
-                                f"\n{self.manager.task_url(self.task_id)}")
         if by_camera:
             db.add_event(self.task_id, f"画面显示采访镜头 {prompts.format_timestamp(run['start'])}–"
                                        f"{prompts.format_timestamp(run['end'])}，已切走")
@@ -642,8 +640,8 @@ class LiveSession:
                 s.setdefault("notified", {})["no_interview_yet"] = True
             mutate_state(self.task_id, mark)
             db.add_event(self.task_id, f"比赛结束 {waited / 60:.0f} 分钟仍未发现采访", level="warning")
-            self.manager.notify(f"【尚未发现采访】{task['title']}\n比赛结束 {waited / 60:.0f} 分钟仍未检测到采访，"
-                                f"请留意直播；如已开始可在任务页手动标注\n{self.manager.task_url(self.task_id)}")
+            self.manager.alert(self.task_id, "尚未发现采访", f"比赛结束 {waited / 60:.0f} 分钟仍未检测到采访，"
+                               f"请留意直播；如已开始可在任务页手动标注")
         if waited > int(cfg["max_post_match_minutes"]) * 60:
             self.manager.no_interview(self.task_id, "比赛结束后长时间未检测到采访")
 
@@ -663,8 +661,9 @@ class LiveManager:
         return f"{config.PUBLIC_URL}/tasks/{task_id}"
 
     @staticmethod
-    def notify(text: str) -> None:
-        feishu.notify(db.get_settings(), text)
+    def alert(task_id: int, kind: str, body: str = "") -> None:
+        """需要人处理的事：在任务的飞书卡片下回复话题。其余进展只更新卡片，不单独发消息。"""
+        cards.alert(task_id, kind, body)
 
     def is_recording(self, task_id: int) -> bool:
         session = self.sessions.get(task_id)
@@ -758,18 +757,16 @@ class LiveManager:
         label = {"auto": "自动判定", "manual": "人工标注", "timeout": "超时截取"}.get(source, source)
         span = f"{prompts.format_timestamp(start)}–{prompts.format_timestamp(end)}"
         db.add_event(task_id, f"采访音频已截取（{label}）：{span}，共 {duration:.0f} 秒")
-        self.notify(f"【采访已截取】{task['title']}\n{label}：录音 {span}，共 {duration / 60:.1f} 分钟，开始转写翻译"
-                    f"\n{self.task_url(task_id)}")
         if self._enqueue:
             self._enqueue(task_id, "ingest")
         return duration
 
     def no_interview(self, task_id: int, reason: str) -> None:
         self.stop(task_id, reason)
-        task = db.update_task(task_id, state=State.NO_INTERVIEW)
+        db.update_task(task_id, state=State.NO_INTERVIEW)
         db.add_event(task_id, f"{reason}，判定为无采访；如有采访可在任务页手动标注起止", level="warning")
-        self.notify(f"【未发现采访】{task['title']}\n{reason}，已停止录制。如有采访请在任务页手动标注起止"
-                    f"\n{self.task_url(task_id)}")
+        if reason != MANUAL_NO_INTERVIEW:
+            self.alert(task_id, "未发现采访", f"{reason}，已停止录制。如有采访请在任务页手动标注起止")
 
     @staticmethod
     def chunk_dir(task_id: int) -> Path:

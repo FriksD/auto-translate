@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import config, db, llm
-from ..integrations.feishu import FeishuClient
+from ..integrations.task_cards import cards
 from ..runner import PipelineRunner
 from ..sources.browser import BrowserFetcher
 from ..sources.hltv import HLTVClient
@@ -468,7 +468,7 @@ def stage_deliver(task_id: int) -> None:
     if docx is None:
         raise RuntimeError("没有找到 Word 文件，请从「生成 Word」重跑")
 
-    lines = [f"【初稿就绪】{task['title']}"]
+    lines = []
     if turnaround:
         lines.append(turnaround)
     report_path = config.task_dir(task_id) / "names_report.json"
@@ -480,9 +480,9 @@ def stage_deliver(task_id: int) -> None:
             ))
         if report.get("unknown"):
             lines.append("未收录的英文词：" + "、".join(report["unknown"][:20]))
-    client = FeishuClient(settings["feishu"])
-    client.send_text("\n".join(lines))
-    client.send_file(docx)
+    # 有任务卡片时提醒和 Word 都发在卡片的话题里，没有时直接发到群里
+    cards.alert(task_id, "初稿就绪", "\n".join(lines))
+    cards.send_file(task_id, docx)
 
 
 def register(runner: PipelineRunner) -> None:

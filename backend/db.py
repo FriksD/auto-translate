@@ -52,6 +52,15 @@ CREATE TABLE IF NOT EXISTS glossary (
     note TEXT
 );
 
+-- 飞书群里每个任务的那张进度卡片
+CREATE TABLE IF NOT EXISTS feishu_cards (
+    task_id INTEGER PRIMARY KEY,
+    message_id TEXT,             -- 还没发出时为空
+    sent_at REAL,
+    digest TEXT,                 -- 上次发出的卡片内容摘要，没变化就不更新
+    rendered_at REAL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value_json TEXT NOT NULL
@@ -173,6 +182,7 @@ def update_task(task_id: int, **fields: Any) -> Dict[str, Any]:
 def delete_task(task_id: int) -> None:
     with _lock:
         _db().execute("DELETE FROM task_events WHERE task_id = ?", (task_id,))
+        _db().execute("DELETE FROM feishu_cards WHERE task_id = ?", (task_id,))
         _db().execute("DELETE FROM tasks WHERE id = ?", (task_id,))
         _db().commit()
 
@@ -192,6 +202,43 @@ def list_events(task_id: int) -> List[Dict[str, Any]]:
             "SELECT * FROM task_events WHERE task_id = ? ORDER BY id", (task_id,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def recent_events(task_id: int, limit: int = 20) -> List[Dict[str, Any]]:
+    """最近的若干条事件，按时间正序。"""
+    with _lock:
+        rows = _db().execute(
+            "SELECT * FROM task_events WHERE task_id = ? ORDER BY id DESC LIMIT ?", (task_id, limit)
+        ).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
+# ── 飞书卡片 ──────────────────────────────────────────────────────────────────
+
+def track_card(task_id: int) -> None:
+    """登记任务需要一张飞书卡片（由卡片服务发出）；已登记的不变。"""
+    with _lock:
+        _db().execute("INSERT OR IGNORE INTO feishu_cards (task_id) VALUES (?)", (task_id,))
+        _db().commit()
+
+
+def get_card(task_id: int) -> Optional[Dict[str, Any]]:
+    with _lock:
+        row = _db().execute("SELECT * FROM feishu_cards WHERE task_id = ?", (task_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_cards() -> List[Dict[str, Any]]:
+    with _lock:
+        rows = _db().execute("SELECT * FROM feishu_cards ORDER BY task_id").fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_card(task_id: int, **fields: Any) -> None:
+    assignments = ", ".join(f"{k} = ?" for k in fields)
+    with _lock:
+        _db().execute(f"UPDATE feishu_cards SET {assignments} WHERE task_id = ?", list(fields.values()) + [task_id])
+        _db().commit()
 
 
 # ── 术语表 ────────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@
 启动：python -m backend   （默认 http://127.0.0.1:8000）
 """
 import asyncio
+import concurrent.futures
 import io
 import json
 import logging
@@ -20,7 +21,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config, db, llm
-from .integrations import feishu
+from .integrations import feishu, task_cards
+from .integrations.feishu_ws import CardCallbackClient
+from .integrations.task_cards import cards
 from .pipeline import live, match_sources, stages
 from .pipeline.watcher import MatchWatcher
 from .runner import STAGES, STAGE_KEYS, PipelineRunner, State
@@ -35,8 +38,7 @@ LIVE_TASK_STATES = (State.RESERVED, State.WATCHING, State.RECORDING, State.INTER
 
 
 async def _notify_failure(task_id: int, message: str) -> None:
-    task = db.get_task(task_id)
-    await run_in_threadpool(feishu.notify, db.get_settings(), f"【处理失败】{task['title']}\n{message}")
+    await run_in_threadpool(cards.alert, task_id, "处理失败", message)
 
 
 def _configure_browser(settings: Dict[str, Any]) -> None:
@@ -72,8 +74,13 @@ async def lifespan(_: FastAPI):
     live.manager.bind(enqueue_threadsafe)
     await run_in_threadpool(live.manager.resume_all)
     watcher.start()
+    global _main_loop
+    _main_loop = loop
+    cards.start()
+    card_callbacks.start(db.get_settings()["feishu"])
     logger.info("服务已启动，数据目录：%s", config.DATA_DIR)
     yield
+    cards.stop()
     await watcher.stop()
     await runner.stop()
     await run_in_threadpool(live.manager.stop_all)
@@ -113,6 +120,8 @@ async def get_settings():
 async def put_settings(settings: Dict[str, Any]):
     saved = db.save_settings(settings)
     _configure_browser(saved)
+    card_callbacks.start(saved["feishu"])
+    cards.wake()
     return saved
 
 
@@ -135,10 +144,16 @@ async def test_llm(body: ProviderTest):
 
 @app.post("/api/feishu/test")
 async def test_feishu(body: Dict[str, Any]):
+    """发一张示例卡片并在它下面回复话题；卡片上的按钮可以用来检查长连接回调是否连通。"""
+    def send() -> None:
+        client = feishu.FeishuClient(body)
+        message_id = client.send_card(task_cards.demo_card())
+        client.reply_text(message_id, "【测试】需要处理的提醒会像这样回复在卡片下面")
     try:
-        await run_in_threadpool(lambda: feishu.FeishuClient(body).send_text("Auto-Translate-to-News 测试消息"))
+        await run_in_threadpool(send)
     except Exception as error:
         raise HTTPException(400, str(error))
+    card_callbacks.start({**body, "enabled": True})
     return {"ok": True}
 
 
@@ -237,6 +252,7 @@ async def create_task(body: TaskCreate):
         fields["match_hltv_id"] = str(match_id)
     task = db.create_task(state=State.DRAFT, **fields)
     db.add_event(task["id"], "任务已创建")
+    cards.track(task["id"])
     # 文件任务等上传完成后再开始
     if body.source_type == "url" and body.start:
         runner.enqueue(task["id"])
@@ -469,7 +485,7 @@ async def live_capture(task_id: int, body: CaptureRequest):
 @app.post("/api/tasks/{task_id}/live/no-interview")
 async def live_no_interview(task_id: int):
     _require_live(task_id)
-    await run_in_threadpool(live.manager.no_interview, task_id, "人工确认本场无采访")
+    await run_in_threadpool(live.manager.no_interview, task_id, live.MANUAL_NO_INTERVIEW)
     return db.get_task(task_id)
 
 
@@ -540,9 +556,86 @@ async def reserve_match(match_id: int, body: ReserveRequest):
         notes=body.notes,
     )
     db.add_event(task["id"], "已预约比赛")
+    cards.track(task["id"])
     # 立即抓取背景信息；只跑这一阶段，完成后回到「已预约」
     runner.enqueue(task["id"], "context", "context")
     return db.get_task(task["id"])
+
+
+# ── 飞书卡片按钮 ──────────────────────────────────────────────────────────────
+
+CARD_ACTIONS = {
+    "check": "立即检查", "record": "立即录制", "stream": "填写直播链接录制", "match_over": "比赛已结束",
+    "no_interview": "本场无采访", "cancel": "取消预约", "retry": "从失败处重试", "done": "标记完成",
+}
+# 飞书要求 3 秒内响应卡片回调，操作没做完就先回"已提交"
+CARD_ACTION_TIMEOUT = 2.5
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _stream_provider(url: str) -> Optional[str]:
+    host = url.lower()
+    for key, provider in (("twitch.tv", "twitch"), ("youtube.com", "youtube"), ("youtu.be", "youtube"),
+                          ("kick.com", "kick")):
+        if key in host:
+            return provider
+    return None
+
+
+async def _card_action(action: str, task_id: int, form: Dict[str, Any]) -> str:
+    """执行卡片上的按钮，复用对应的接口；失败时抛出 HTTPException。"""
+    label = CARD_ACTIONS.get(action)
+    if label is None:
+        raise HTTPException(400, f"未知操作：{action}")
+    if task_id == task_cards.DEMO_TASK_ID:
+        return f"卡片按钮已连通（{label}）"
+    task = _require_task(task_id)
+    if action == "check":
+        await live_check(task_id)
+        message = "已安排立即检查比分"
+    elif action == "record":
+        await live_record(task_id, StreamRequest())
+        message = "已开始录制"
+    elif action == "stream":
+        url = str(form.get("url") or "").strip()
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(400, "请填写直播链接")
+        await live_record(task_id, StreamRequest(url=url, provider=_stream_provider(url)))
+        message = "已用这个链接开始录制"
+    elif action == "match_over":
+        await live_match_over(task_id)
+        message = "已记录比赛结束，开始监听采访"
+    elif action == "no_interview":
+        await live_no_interview(task_id)
+        message = "已停止录制"
+    elif action == "cancel":
+        await cancel_task(task_id)
+        message = "已取消"
+    elif action == "retry":
+        if task["state"] != State.FAILED:
+            raise HTTPException(409, "任务不是失败状态")
+        await run_task(task_id, RunRequest(from_stage=task["stage"] or STAGE_KEYS[0]))
+        message = "已重新开始处理"
+    else:
+        await mark_done(task_id)
+        message = "已标记完成"
+    db.add_event(task_id, f"飞书卡片操作：{label}")
+    cards.wake()
+    return message
+
+
+def _on_card_action(action: str, task_id: int, form: Dict[str, Any], operator: str) -> str:
+    """长连接线程里调用：把操作交给服务的事件循环执行。"""
+    if _main_loop is None:
+        raise RuntimeError("服务还没启动完成")
+    future = asyncio.run_coroutine_threadsafe(_card_action(action, task_id, form), _main_loop)
+    try:
+        return future.result(timeout=CARD_ACTION_TIMEOUT)
+    except concurrent.futures.TimeoutError:
+        return "已提交，卡片稍后更新"
+
+
+card_callbacks = CardCallbackClient(_on_card_action)
 
 
 # ── 前端静态资源（npm run build 后生成 dist/） ─────────────────────────────────

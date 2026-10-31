@@ -161,8 +161,8 @@ class MatchWatcher:
     def check_soon(self, task_id: int) -> None:
         self._next_check[task_id] = 0
 
-    async def _notify(self, text: str) -> None:
-        await asyncio.to_thread(self.live.notify, text)
+    async def _alert(self, task_id: int, kind: str, body: str = "") -> None:
+        await asyncio.to_thread(self.live.alert, task_id, kind, body)
 
     async def _loop(self) -> None:
         while True:
@@ -256,13 +256,10 @@ class MatchWatcher:
             "round_source": match.get("round_source"),
         }, streams=match.get("streams") or [], map_live_since=live_since)
         notified = dict(state.get("notified") or {})
-        title = task["title"]
-        url = self.live.task_url(task_id)
 
         if assessment["status"] in ("live", "over") and not notified.get("start"):
             notified["start"] = True
             db.add_event(task_id, f"比赛已开始：{summary}")
-            await self._notify(f"【比赛开始】{title}\n{url}")
 
         if assessment["should_record"] and task["state"] == State.WATCHING and not self.live.is_recording(task_id):
             if await self._start_recording(task, state, summary, notified):
@@ -303,22 +300,20 @@ class MatchWatcher:
             s.pop("record_wins", None)
             s.pop("detection", None)  # 图间的转写不会有赛后采访，判断从头开始
         mutate_state(task_id, reset)
-        await self._notify(f"【暂停录制】{task['title']}\n{summary}，系列赛还没结束，等下一张决胜图再录"
-                           f"\n{self.live.task_url(task_id)}")
+        db.add_event(task_id, f"暂停录制：{summary}，系列赛还没结束，等下一张决胜图再录")
 
     async def _start_recording(self, task: Dict[str, Any], state: Dict[str, Any], summary: str,
                                notified: Dict[str, Any]) -> bool:
-        task_id, title, url = task["id"], task["title"], self.live.task_url(task["id"])
+        task_id = task["id"]
         stream = state.get("stream") or pick_stream(candidate_streams(task, state))
         if stream is None:
             db.add_event(task_id, "需要开始录制，但没有找到官方直播源，请在任务页填写直播链接", level="error")
             if not notified.get("no_stream"):
                 notified["no_stream"] = True
-                await self._notify(f"【找不到直播源】{title}\n{summary}\n请在任务页填写直播链接\n{url}")
+                await self._alert(task_id, "找不到直播源", f"{summary}\n请在卡片里填写直播链接")
             return False
         await asyncio.to_thread(self.live.start, task_id, stream)
         db.update_task(task_id, state=State.RECORDING)
-        await self._notify(f"【开始录制】{title}\n{summary}\n直播源：{stream.get('name')} {stream['url']}\n{url}")
         return True
 
     async def _on_sources_down(self, task: Dict[str, Any], cfg: Dict[str, Any], error: str) -> None:
@@ -332,12 +327,11 @@ class MatchWatcher:
             return
         notified = dict(state.get("notified") or {})
         down = now - since
-        title, url = task["title"], self.live.task_url(task_id)
         if down >= SOURCE_DOWN_ALERT and not notified.get("source_down"):
             notified["source_down"] = True
             db.add_event(task_id, f"比分数据源已连续 {down / 60:.0f} 分钟不可用：{error}", level="error")
-            await self._notify(f"【比分数据源不可用】{title}\n已连续 {down / 60:.0f} 分钟读不到比分：{error}\n"
-                               f"开赛后会直接开始录制并监听采访；比赛结束后可在任务页点「比赛已结束」\n{url}")
+            await self._alert(task_id, "比分数据源不可用", f"已连续 {down / 60:.0f} 分钟读不到比分：{error}\n"
+                              f"开赛后会直接开始录制并监听采访；比赛结束后可在卡片上点「比赛已结束」")
         started = task.get("match_time") and now >= task["match_time"]
         if (down >= SOURCE_DOWN_RECORD and started and task["state"] == State.WATCHING
                 and not self.live.is_recording(task_id)):
@@ -362,10 +356,9 @@ class MatchWatcher:
         db.update_task(task_id, state=State.INTERVIEW_DETECTING if recording else State.NO_INTERVIEW)
         if recording:
             db.add_event(task_id, f"比赛结束：{summary}，继续监听采访")
-            await self._notify(f"【比赛结束】{task['title']}\n{summary}\n正在录制直播并监听赛后采访\n{self.live.task_url(task_id)}")
         else:
             db.add_event(task_id, f"比赛结束：{summary}，但没有在录制（找不到直播源），请手动上传采访音频", level="error")
-            await self._notify(f"【比赛结束】{task['title']}\n{summary}\n没有录到直播，请手动上传采访音频\n{self.live.task_url(task_id)}")
+            await self._alert(task_id, "比赛结束但没有录到直播", f"{summary}\n请在任务页手动上传采访音频")
 
     async def mark_over(self, task_id: int) -> None:
         """人工确认比赛已结束（数据源不可用时）。"""
@@ -396,5 +389,4 @@ class MatchWatcher:
         mutate_state(task["id"], mark)
         stage = task.get("stage") or ""
         db.add_event(task["id"], f"采访结束已 {late / 60:.0f} 分钟，初稿还没完成（当前：{stage}）", level="error")
-        await self._notify(f"【初稿超时】{task['title']}\n采访结束已 {late / 60:.0f} 分钟，初稿还没完成（当前阶段：{stage}）"
-                           f"\n{self.live.task_url(task['id'])}")
+        await self._alert(task["id"], "初稿超时", f"采访结束已 {late / 60:.0f} 分钟，初稿还没完成（当前阶段：{stage}）")
