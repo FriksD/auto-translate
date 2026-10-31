@@ -14,6 +14,7 @@ from backend import config, db
 from backend.config import DEFAULT_SETTINGS
 from backend.integrations import feishu, task_cards
 from backend.integrations.feishu_ws import FeishuEventClient
+from backend.pipeline import live
 from backend.runner import State
 
 CFG = DEFAULT_SETTINGS["live"]
@@ -152,10 +153,42 @@ class CardServiceTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.service = task_cards.TaskCardService()
         self.task = db.create_task(title="A vs B", state=State.RESERVED, source_type="live", match_hltv_id="1")
+        live.patch_state(self.task["id"], recording={"started_at": time.time()})  # 录过才发卡片
 
     def tearDown(self):
         db._conn.close()
         self.tmp.cleanup()
+
+    def test_reserved_card_waits_for_recording(self):
+        task = db.create_task(title="C vs D", state=State.RESERVED, source_type="live", match_hltv_id="2")
+        self.service.track(task["id"])
+        self.service.sync_all()
+        db.update_task(task["id"], state=State.WATCHING)
+        self.service.sync_all()
+        self.assertEqual(self.client.sent, [])
+        live.patch_state(task["id"], recording={"started_at": time.time()})
+        db.update_task(task["id"], state=State.RECORDING)
+        self.service.sync_all()
+        self.assertEqual(len(self.client.sent), 1)
+
+    def test_cancelled_reservation_never_sends(self):
+        task = db.create_task(title="C vs D", state=State.RESERVED, source_type="live", match_hltv_id="2")
+        self.service.track(task["id"])
+        db.update_task(task["id"], state=State.CANCELLED)
+        self.service.sync_all()
+        self.assertEqual(self.client.sent, [])
+
+    def test_alert_before_recording_sends_card(self):
+        task = db.create_task(title="C vs D", state=State.WATCHING, source_type="live", match_hltv_id="2")
+        self.service.track(task["id"])
+        self.service.alert(task["id"], "找不到直播源", "请在卡片里填写直播链接")
+        self.assertEqual(len(self.client.sent), 1)
+        self.assertEqual(self.client.replies, [("om_1", "【找不到直播源】请在卡片里填写直播链接")])
+
+    def test_manual_task_card_sent_at_once(self):
+        task = db.create_task(title="上传", state=State.DRAFT, source_type="file")
+        self.service.track(task["id"])
+        self.assertEqual(self.service.sync(task["id"]), "om_1")
 
     def test_send_once_then_update_on_change(self):
         self.service.track(self.task["id"])

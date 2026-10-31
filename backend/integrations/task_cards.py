@@ -2,6 +2,8 @@
 飞书群里"一个任务一张卡片"。
 
 - 任务创建（预约比赛、新建任务）时登记，卡片服务在后台发出卡片，记下 message_id。
+  预约的比赛等到开始录制才发卡片（预约一多，赛前的卡片会把群里的消息冲掉）；
+  赛前就需要人处理（找不到直播源等）时随提醒一起发出。
 - 卡片内容完全由任务当前状态算出来（build_card 是纯函数），后台每隔几秒重算一次，
   内容有变化就整张替换。更新卡片不会提醒群成员，所以主聊天里一场比赛始终只有一条消息。
 - 需要人处理的事（找不到直播源、处理失败、初稿就绪……）用 alert() 在卡片下面以话题回复，会提醒。
@@ -47,6 +49,9 @@ QUIET_STATES = (State.REVIEW, State.DONE, State.FAILED, State.NO_INTERVIEW, Stat
 # 服务启动时给还没有卡片的这些任务补发卡片
 ACTIVE_STATES = (State.RESERVED, State.WATCHING, State.RECORDING, State.INTERVIEW_DETECTING,
                  State.QUEUED, State.PROCESSING)
+
+# 直播任务在这些状态下还没开始录制，先不发卡片
+PRE_RECORDING_STATES = (State.RESERVED, State.WATCHING, State.CANCELLED)
 
 LIVE_STEPS = ["预约", "监视", "录制", "采访", "初稿", "精校"]
 MANUAL_STEPS = ["创建", "处理", "精校"]
@@ -174,6 +179,8 @@ def _status_lines(task: Dict[str, Any], state: Dict[str, Any], progress: Optiona
             lines.append(f"{snapshot['reason']}{next_check}")
         if state.get("source_down_since"):
             lines.append(f"⚠️ 比分数据源 {_clock(state['source_down_since'])} 起不可用")
+        if state.get("stream_down_since") and status != State.WATCHING:
+            lines.append(f"⚠️ 直播流 {_clock(state['stream_down_since'])} 起中断，正在重连")
     elif status == State.QUEUED:
         lines.append("排队等待处理")
     elif status == State.PROCESSING:
@@ -360,6 +367,15 @@ def _read_json(path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
+def ready_to_send(task: Dict[str, Any]) -> bool:
+    """还没发出的卡片现在该不该发：预约的比赛等开始录制；取消的预约就不发了。"""
+    if task["source_type"] != "live" or task["state"] not in PRE_RECORDING_STATES:
+        return True
+    from ..pipeline import live
+
+    return task["state"] != State.CANCELLED and bool(live.load_state(task["id"]).get("recording"))
+
+
 def render(task: Dict[str, Any], reserved_by: Optional[str] = None) -> Dict[str, Any]:
     from ..pipeline import live, stages
 
@@ -427,12 +443,17 @@ class TaskCardService:
             except Exception as error:
                 logger.warning("任务 %s 飞书卡片同步失败：%s", task["id"], error)
 
-    def sync(self, task_id: int) -> Optional[str]:
-        """把卡片更新到任务当前状态（还没发就发出），返回 message_id；任务没登记卡片时返回 None。"""
+    def sync(self, task_id: int, force: bool = False) -> Optional[str]:
+        """
+        把卡片更新到任务当前状态（还没发就发出），返回 message_id；任务没登记卡片时返回 None。
+        还没开始录制的直播任务先不发，返回 None；force：要在卡片下提醒，现在就发。
+        """
         with self._locks[task_id]:
             row = db.get_card(task_id)
             task = db.get_task(task_id)
             if row is None or task is None:
+                return None
+            if not row["message_id"] and not force and not ready_to_send(task):
                 return None
             card = render(task, row.get("reserved_by"))
             card_digest = digest(card)
@@ -466,7 +487,7 @@ class TaskCardService:
             return
         text = f"【{kind}】{body}".rstrip()
         try:
-            message_id = self.sync(task_id)
+            message_id = self.sync(task_id, force=True)
             if message_id:
                 client = feishu.client_for(settings)
                 if mention_all:
@@ -487,7 +508,7 @@ class TaskCardService:
     def send_file(self, task_id: int, path: Path) -> None:
         """把文件发到任务卡片的话题里；没有卡片时直接发到群里。失败时抛出异常。"""
         client = feishu.client_for(db.get_settings())
-        message_id = self.sync(task_id)
+        message_id = self.sync(task_id, force=True)
         if message_id:
             client.reply_file(message_id, path)
         else:

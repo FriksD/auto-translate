@@ -497,3 +497,29 @@ class CameraDetectTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecorderOutageTest(unittest.TestCase):
+    def test_one_error_per_outage(self):
+        from backend.pipeline import recorder
+
+        events = []
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        rec = recorder.Recorder("https://twitch.tv/x", Path(tmp.name) / "chunks", "ffmpeg", None,
+                                on_event=lambda level, message: events.append(level))
+        attempts = []
+
+        def fail_fast():
+            attempts.append(1)
+            if len(attempts) == 6:
+                rec.down_since = None  # 中间稳定录过一阵（_record_once 里判定恢复）
+            if len(attempts) >= 12:
+                rec._stop.set()
+            return False
+
+        with unittest.mock.patch.object(recorder, "RETRY_DELAYS", [0]), \
+                unittest.mock.patch.object(rec, "_record_once", fail_fast):
+            rec._run()
+        # 第 3 次失败报错，之后不再报；恢复后再断（失败次数仍在累计）立刻再报一次
+        self.assertEqual([i for i, level in enumerate(events) if level == "error"], [2, 5])

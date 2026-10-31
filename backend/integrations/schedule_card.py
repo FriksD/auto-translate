@@ -151,7 +151,11 @@ def _match_row(match: Dict[str, Any], view: Dict[str, Any], show_date: bool) -> 
     event = (match.get("event") or {}).get("name") or ""
     detail = " · ".join(p for p in (event, (match.get("format") or "").upper()) if p)
     left = {"tag": "markdown", "content": f"`{when}` **{_match_teams(match)}** {stars}\n<font color='grey'>{detail}</font>"}
-    if match.get("task_id"):
+    if match.get("task_id") and match.get("task_state") in ("reserved", "watching"):
+        # 开始录制前没有进度卡片，取消预约在这里
+        right = _button("取消预约", {"action": "unreserve", "task_id": match["task_id"], "view": view}, "danger")
+        right["confirm"] = {"title": _text("取消预约？"), "text": _text(f"{_match_teams(match)} 将不再监视和录制")}
+    elif match.get("task_id"):
         right = {"tag": "markdown", "content": "✅ 已预约", "text_align": "right"}
     else:
         right = _button("预约", {"action": "reserve", "match_id": match["id"], "view": view}, "primary")

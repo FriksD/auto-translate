@@ -534,7 +534,7 @@ async def list_matches(refresh: bool = False, days: int = 5):
         if match["unix_ms"] and match["unix_ms"] > horizon:
             continue
         task = db.find_task_by_match(match["id"])
-        result.append({**match, "task_id": task["id"] if task else None})
+        result.append({**match, "task_id": task["id"] if task else None, "task_state": task["state"] if task else None})
     return {"fetched_at": stages.hltv.cached_at("matches"), "matches": result}
 
 
@@ -622,7 +622,15 @@ async def _card_action(value: Dict[str, Any], form: Dict[str, Any], operator: st
     if action == "reserve":
         task = await _reserve(int(value["match_id"]), reserved_by=operator or None)
         await _update_schedule(message_id, view)
-        return f"已预约 {task['title']}，进度卡片已发到群里"
+        return RESERVED_REPLY.format(title=task["title"])
+    if action == "unreserve":
+        task = _require_task(int(value["task_id"]))
+        if task["state"] not in (State.RESERVED, State.WATCHING):
+            raise HTTPException(409, "已经开始录制，请在进度卡片上操作")
+        await cancel_task(task["id"])
+        db.add_event(task["id"], "在飞书赛程卡片上取消预约")
+        await _update_schedule(message_id, view)
+        return f"已取消预约 {task['title']}"
     label = CARD_ACTIONS.get(action)
     if label is None:
         raise HTTPException(400, f"未知操作：{action}")
@@ -677,6 +685,9 @@ def _on_card_action(value: Dict[str, Any], form: Dict[str, Any], operator: str, 
 
 # ── 飞书机器人命令（群里 @机器人 或私聊） ─────────────────────────────────────
 
+RESERVED_REPLY = "已预约 {title}，开始录制时进度卡片会发到群里；在赛程卡片上可以取消预约"
+
+
 def _command_allowed(event: Dict[str, Any], feishu_settings: Dict[str, Any]) -> bool:
     """只响应配置的那个群和私聊：预约出来的进度卡片都发到配置的群里。"""
     if event.get("chat_type") == "p2p":
@@ -706,7 +717,7 @@ async def _handle_command(event: Dict[str, Any]) -> None:
                 await reply("无法从链接中识别 HLTV 比赛 ID")
                 return
             task = await _reserve(match_id, reserved_by=event.get("sender") or None)
-            await reply(f"已预约 {task['title']}，进度卡片已发到群里")
+            await reply(RESERVED_REPLY.format(title=task["title"]))
         else:
             card = await _schedule_card(args)
             await run_in_threadpool(client.reply_card, message_id, card)

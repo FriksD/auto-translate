@@ -377,9 +377,16 @@ class LiveSession:
             self._thread.join(timeout=60)
 
     def _on_recorder_event(self, level: str, message: str) -> None:
+        if level == "recovered":
+            patch_state(self.task_id, stream_down_since=None)
+            db.add_event(self.task_id, message)
+            return
         db.add_event(self.task_id, message, level="error" if level == "error" else level)
         if level == "error":
-            self.manager.alert(self.task_id, "录制异常", f"{message}，可以在卡片里填一个直播链接换源")
+            # 每次中断只提醒一次（代理不稳时断流很常见）；恢复之后再断才再提醒
+            patch_state(self.task_id, stream_down_since=time.time())
+            self.manager.alert(self.task_id, "录制异常", f"{message}，可以在卡片里填一个直播链接换源；"
+                               f"恢复之前不再重复提醒", mention_all=True)
 
     def _on_not_live(self, url: str, connected_at: float) -> Optional[str]:
         """拉到的是回放：丢掉这次连接录到的内容，换下一个候选直播源；没有可换的就停止录制。"""
@@ -688,6 +695,7 @@ class LiveManager:
 
             def init(s: Dict[str, Any]) -> None:
                 s["stream"] = stream
+                s.pop("stream_down_since", None)  # 新会话重新计算中断（服务重启后中断没恢复会再提醒一次）
                 recording = s.setdefault("recording", {})
                 recording.setdefault("started_at", time.time())
                 recording["active"] = True
@@ -707,6 +715,7 @@ class LiveManager:
             db.add_event(task_id, f"已停止录制{('：' + reason) if reason else ''}")
 
         def mark(s: Dict[str, Any]) -> None:
+            s.pop("stream_down_since", None)
             if s.get("recording"):
                 s["recording"]["active"] = False
                 s["recording"].setdefault("stopped_at", time.time())

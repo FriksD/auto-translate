@@ -9,7 +9,7 @@
 
 精校记录存在任务目录的 review.json：
   draft_mtime   上次由精校页写入 draft_zh.txt 的时间；文件被别处改过就重置下面的对应关系
-  en_index      第 i 段中文对应第几段英文（删段后保持对应）
+  en_index      第 i 段中文对应第几个英文问答块（删段后保持对应）；align 是对应算法的版本
   meta          段落内容摘要 → {by, at}，谁最后改的这一段
   finalized     {by, at}
 """
@@ -44,6 +44,8 @@ FRAME_NAME = re.compile(r"^f_\d{8}_\d{6}\.jpg$")
 PREFIX = re.compile(r"^\s*[QqAa]\s*[:：]\s*")
 WORD = re.compile(r"[a-z0-9']+")
 BUSY_STATES = (State.QUEUED, State.PROCESSING)
+# review.json 里 en_index 的算法版本：2 = 按问答块对应（1 是按段落序号，译稿拆段时会错位）
+ALIGN_VERSION = 2
 
 _locks: Dict[int, threading.Lock] = defaultdict(threading.Lock)
 _audio_lock = threading.Lock()
@@ -68,6 +70,30 @@ def join_paragraphs(paragraphs: List[str]) -> str:
 
 def fingerprint(paragraph: str) -> str:
     return hashlib.sha1(paragraph.encode("utf-8")).hexdigest()[:16]
+
+
+def qa_blocks(paragraphs: List[str]) -> List[int]:
+    """
+    每段属于第几个问答：Q:/A: 开头的段落开始新的一问或一答，没有前缀的段落接着上一问/答
+    （译稿常把一段长回答拆成几段，按段落序号一一对应就会错位）。
+    """
+    result, current = [], -1
+    for paragraph in paragraphs:
+        if current < 0 or PREFIX.match(paragraph):
+            current += 1
+        result.append(current)
+    return result
+
+
+def group_blocks(paragraphs: List[str]) -> List[str]:
+    """把英文稿合并成一问一答一块，和 qa_blocks 的编号对应。"""
+    blocks: List[str] = []
+    for paragraph, block in zip(paragraphs, qa_blocks(paragraphs)):
+        if block < len(blocks):
+            blocks[block] += " " + paragraph
+        else:
+            blocks.append(paragraph)
+    return blocks
 
 
 def apply_edit(paragraphs: List[str], en_index: List[int], index: int, base: str,
@@ -141,8 +167,10 @@ def _load(task_id: int) -> Tuple[List[str], Dict[str, Any]]:
         raise HTTPException(404, "还没有中文初稿")
     paragraphs = split_paragraphs(path.read_text(encoding="utf-8"))
     review = _read_json(config.task_dir(task_id) / REVIEW_FILE)
-    if review.get("draft_mtime") != path.stat().st_mtime or len(review.get("en_index") or []) != len(paragraphs):
-        review["en_index"] = list(range(len(paragraphs)))
+    if (review.get("draft_mtime") != path.stat().st_mtime or review.get("align") != ALIGN_VERSION
+            or len(review.get("en_index") or []) != len(paragraphs)):
+        review["en_index"] = qa_blocks(paragraphs)
+        review["align"] = ALIGN_VERSION
     review.setdefault("meta", {})
     return paragraphs, review
 
@@ -197,7 +225,7 @@ def payload(task_id: int) -> Dict[str, Any]:
     directory = config.task_dir(task_id)
     paragraphs, review = _load(task_id)
     english_path = directory / ENGLISH
-    english = split_paragraphs(english_path.read_text(encoding="utf-8")) if english_path.exists() else []
+    english = group_blocks(split_paragraphs(english_path.read_text(encoding="utf-8"))) if english_path.exists() else []
     times = _english_times(task_id, english) if english else []
     transcript = _read_json(directory / "transcript.json")
     duration = transcript.get("duration")
@@ -205,10 +233,12 @@ def payload(task_id: int) -> Dict[str, Any]:
     items = []
     for index, paragraph in enumerate(paragraphs):
         en = review["en_index"][index]
+        # 同一问/答拆成的几段：英文和音频位置只放在第一段
+        first = index == 0 or review["en_index"][index - 1] != en
         items.append({
             "zh": paragraph,
-            "en": english[en] if en < len(english) else "",
-            "start": times[en] if en < len(times) else None,
+            "en": english[en] if first and en < len(english) else "",
+            "start": times[en] if first and en < len(times) else None,
             "edited": review["meta"].get(fingerprint(paragraph)),
         })
     return {

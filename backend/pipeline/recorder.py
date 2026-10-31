@@ -96,7 +96,8 @@ class Recorder:
                  frame_interval: int = 0):
         """
         Args:
-            on_event: 回调 (level, message)，用于写任务日志和发通知
+            on_event: 回调 (level, message)，用于写任务日志和发通知；level 为 error 表示一次新的中断（每次中断只有一次），
+                recovered 表示中断后已经稳定恢复
             on_not_live: 回调 (url, connected_at)，发现拉到的是回放时调用；返回换用的直播源地址，
                 返回 None 则停止录制，等人工指定直播源
         """
@@ -114,6 +115,8 @@ class Recorder:
         self._procs: List[subprocess.Popen] = []
         self._thread: Optional[threading.Thread] = None
         self.connected_since: Optional[float] = None
+        # 这次中断从什么时候开始（已经报过错、还没恢复）
+        self.down_since: Optional[float] = None
 
     @property
     def running(self) -> bool:
@@ -184,7 +187,11 @@ class Recorder:
             failures = 0 if time.time() - started > STABLE_SECONDS else failures + 1
             delay = RETRY_DELAYS[min(failures, len(RETRY_DELAYS) - 1)]
             message = f"直播流中断，{delay} 秒后重连" + (f"（连续失败 {failures} 次）" if failures else "")
-            self.on_event("error" if failures == NOTIFY_AFTER_FAILURES else "warning", message)
+            # 一次中断只报一次错（会提醒人）；连上并稳定录了 STABLE_SECONDS 秒才算恢复，之后再断再报
+            outage = failures >= NOTIFY_AFTER_FAILURES and self.down_since is None
+            if outage:
+                self.down_since = started
+            self.on_event("error" if outage else "warning", message)
             self._stop.wait(delay)
 
     def _record_once(self) -> bool:
@@ -216,6 +223,9 @@ class Recorder:
                     try:
                         ffmpeg.wait(timeout=LIVE_CHECK_INTERVAL)
                     except subprocess.TimeoutExpired:
+                        if self.down_since is not None and time.time() - connected > STABLE_SECONDS:
+                            self.on_event("recovered", f"直播流已恢复（{time.time() - self.down_since:.0f} 秒前开始中断）")
+                            self.down_since = None
                         recorded = recorded_since(self.chunk_dir, connected)
                         if is_faster_than_live(recorded, time.time() - connected):
                             log.write(f"不是直播：{time.time() - connected:.0f} 秒内录到 {recorded:.0f} 秒音频\n")

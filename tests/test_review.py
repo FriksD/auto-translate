@@ -81,6 +81,13 @@ class ParagraphTest(unittest.TestCase):
         paragraphs, en_index, _ = review.apply_edit(self.PARAS, [0, 1, 2], 0, "Q：一", "  ")
         self.assertEqual((paragraphs, en_index), (["A：二", "Q：三"], [1, 2]))
 
+    def test_split_answer_pairs_by_qa_block(self):
+        # 译稿把第一个回答拆成了两段（第二段没有 A：前缀），英文稿则把第二个问题拆成两段
+        zh = ["Q：一", "A：二", "二续", "Q：三", "A：四"]
+        en = ["Q: one", "A: two", "Q: three", "three more", "A: four"]
+        self.assertEqual(review.qa_blocks(zh), [0, 1, 1, 2, 3])
+        self.assertEqual(review.group_blocks(en), ["Q: one", "A: two", "Q: three three more", "A: four"])
+
     def test_paragraph_times(self):
         transcript = {"segments": [
             {"start": 0.0, "end": 3.0, "text": "Thanks for watching!"},
@@ -184,6 +191,19 @@ class ReviewApiTest(unittest.TestCase):
         self.assertEqual(result["task"]["state"], State.DONE)
         self.assertEqual(result["finalized"]["by"], "本机")
         self.assertIsNotNone(next(config.task_dir(self.task["id"]).glob("*.docx"), None))
+
+    def test_payload_split_answer_stays_aligned(self):
+        directory = config.task_dir(self.task["id"])
+        draft = directory / "draft_zh.txt"
+        draft.write_text("Q：你好吗？\n\nA：很好。\n\n真的很好。\n", encoding="utf-8")
+        # 旧版本按段落序号存的对应关系（MOUZ vs Vitality 那场）要按问答块重算
+        (directory / "review.json").write_text(json.dumps({"en_index": [0, 1, 2], "draft_mtime": draft.stat().st_mtime}))
+        paragraphs = self.local.get(self.url()).json()["paragraphs"]
+        self.assertEqual([p["en"] for p in paragraphs], ["Q: How are you?", "A: Good.", ""])
+        self.assertEqual([p["start"] for p in paragraphs], [2.0, 5.0, None])
+        # 删掉回答的第一段，续段接上英文
+        response = self.local.put(self.url("/paragraphs/1"), json={"base": "A：很好。", "text": ""})
+        self.assertEqual([p["en"] for p in response.json()["paragraphs"]], ["Q: How are you?", "A: Good."])
 
     def test_busy_task_not_editable(self):
         db.update_task(self.task["id"], state=State.PROCESSING)
