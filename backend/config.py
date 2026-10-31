@@ -93,6 +93,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "app_secret": "",
         "receive_id_type": "chat_id",  # chat_id 或 open_id
         "receive_id": "",
+        # 内网穿透的公网地址（如 https://xxx.ngrok-free.dev），填了才有在线精校的链接
+        "public_url": "",
     },
 }
 

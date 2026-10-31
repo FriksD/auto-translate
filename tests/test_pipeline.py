@@ -78,7 +78,7 @@ class PipelineTest(unittest.TestCase):
         whisper = FakeWhisper()
         with patch.object(stages, "_get_whisper", return_value=whisper), \
                 patch.object(stages.llm, "complete", side_effect=fake_complete), \
-                TestClient(app_module.app) as client:
+                TestClient(app_module.app, base_url="http://127.0.0.1") as client:
             settings = client.get("/api/settings").json()
             settings["llm"]["providers"] = [{"id": "p1", "name": "fake", "protocol": "openai", "model": "m"}]
             settings["llm"]["clean"]["provider_id"] = "p1"

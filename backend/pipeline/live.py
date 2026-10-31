@@ -751,7 +751,8 @@ class LiveManager:
         clip_end = min(end + pad, timeline[-1][1] + timeline[-1][2])
         duration = cut_audio(timeline, clip_start, clip_end, config.task_dir(task_id) / "interview.wav")
         def record(s: Dict[str, Any]) -> None:
-            s["interview"] = {"start": start, "end": end, "source": source, "captured_at": time.time()}
+            s["interview"] = {"start": start, "end": end, "clip_start": clip_start, "source": source,
+                              "captured_at": time.time()}
             s.setdefault("notified", {}).pop("deadline", None)  # 重新截取后重新计时
         mutate_state(task_id, record)
         label = {"auto": "自动判定", "manual": "人工标注", "timeout": "超时截取"}.get(source, source)

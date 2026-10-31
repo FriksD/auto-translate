@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import config, db, llm
-from ..integrations.task_cards import cards
+from ..integrations.task_cards import cards, review_url
 from ..runner import PipelineRunner
 from ..sources.browser import BrowserFetcher
 from ..sources.hltv import HLTVClient
@@ -471,6 +471,9 @@ def stage_deliver(task_id: int) -> None:
     lines = []
     if turnaround:
         lines.append(turnaround)
+    url = review_url(task_id, settings["feishu"])
+    if url:
+        lines.append(f"在线精校：{url}")
     report_path = config.task_dir(task_id) / "names_report.json"
     if report_path.exists():
         report = json.loads(report_path.read_text(encoding="utf-8"))

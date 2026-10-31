@@ -223,14 +223,23 @@ def _button(label: str, action: str, task_id: int, kind: str = "default",
     return button
 
 
-def _link_button(label: str, url: str) -> Dict[str, Any]:
-    return {"tag": "button", "text": _text(label), "type": "default", "size": "small",
+def _link_button(label: str, url: str, kind: str = "default") -> Dict[str, Any]:
+    return {"tag": "button", "text": _text(label), "type": kind, "size": "small",
             "behaviors": [{"type": "open_url", "default_url": url}]}
 
 
-def _buttons(task: Dict[str, Any], state: Dict[str, Any]) -> List[Dict[str, Any]]:
+def review_url(task_id: int, cfg: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """在线精校页的公网地址；没配置内网穿透地址时没有。"""
+    feishu_cfg = cfg if cfg is not None else db.get_settings()["feishu"]
+    base = (feishu_cfg.get("public_url") or "").strip().rstrip("/")
+    return f"{base}/review/{task_id}" if base else None
+
+
+def _buttons(task: Dict[str, Any], state: Dict[str, Any], public_review: Optional[str] = None) -> List[Dict[str, Any]]:
     task_id, status = task["id"], task["state"]
     buttons = []
+    if public_review and status in (State.REVIEW, State.DONE):
+        buttons.append(_link_button("在线精校", public_review, "primary" if status == State.REVIEW else "default"))
     if task["source_type"] == "live":
         if status in (State.RESERVED, State.WATCHING):
             buttons += [_button("立即检查", "check", task_id), _button("立即录制", "record", task_id),
@@ -247,7 +256,7 @@ def _buttons(task: Dict[str, Any], state: Dict[str, Any]) -> List[Dict[str, Any]
     if status == State.FAILED:
         buttons.append(_button("从失败处重试", "retry", task_id, "primary"))
     elif status == State.REVIEW:
-        buttons.append(_button("标记完成", "done", task_id, "primary"))
+        buttons.append(_button("标记完成", "done", task_id, "default" if public_review else "primary"))
     buttons.append(_link_button("打开任务页", f"{config.PUBLIC_URL}/tasks/{task_id}"))
     return buttons
 
@@ -271,11 +280,12 @@ def _stream_form(task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def build_card(task: Dict[str, Any], state: Dict[str, Any], progress: Optional[Dict[str, Any]] = None,
                events: Optional[List[Dict[str, Any]]] = None, names_report: Optional[Dict[str, Any]] = None,
-               cfg: Optional[Dict[str, Any]] = None, reserved_by: Optional[str] = None) -> Dict[str, Any]:
+               cfg: Optional[Dict[str, Any]] = None, reserved_by: Optional[str] = None,
+               public_review: Optional[str] = None) -> Dict[str, Any]:
     """
     task：db.get_task 的结果；state：live.json（非直播任务为空）；progress：stages.progress 里的阶段进度；
     events：最近的任务事件；names_report：names_report.json；cfg：settings["live"]；
-    reserved_by：在飞书里预约的人的 open_id。
+    reserved_by：在飞书里预约的人的 open_id；public_review：在线精校页的公网地址。
     """
     label, template, tag_color = STATE_STYLE.get(task["state"], (task["state"], "grey", "neutral"))
     recording = task["state"] in (State.RECORDING, State.INTERVIEW_DETECTING)
@@ -298,7 +308,7 @@ def build_card(task: Dict[str, Any], state: Dict[str, Any], progress: Optional[D
         "tag": "column_set",
         "flex_mode": "flow",
         "horizontal_spacing": "8px",
-        "columns": [{"tag": "column", "width": "auto", "elements": [b]} for b in _buttons(task, state)],
+        "columns": [{"tag": "column", "width": "auto", "elements": [b]} for b in _buttons(task, state, public_review)],
     })
     return {
         "schema": "2.0",
@@ -354,8 +364,9 @@ def render(task: Dict[str, Any], reserved_by: Optional[str] = None) -> Dict[str,
 
     state = live.load_state(task["id"]) if task["source_type"] == "live" else {}
     report = _read_json(config.task_dir(task["id"]) / "names_report.json")
+    settings = db.get_settings()
     return build_card(task, state, stages.progress.get(task["id"]), db.recent_events(task["id"], 30), report,
-                      db.get_settings()["live"], reserved_by)
+                      settings["live"], reserved_by, review_url(task["id"], settings["feishu"]))
 
 
 class TaskCardService:

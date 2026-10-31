@@ -258,6 +258,7 @@ export interface Settings {
     app_secret: string
     receive_id_type: 'chat_id' | 'open_id'
     receive_id: string
+    public_url: string
   }
 }
 

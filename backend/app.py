@@ -14,13 +14,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, db, llm
+from . import config, db, llm, review, web_auth
 from .integrations import feishu, schedule_card, task_cards
 from .integrations.feishu_ws import FeishuEventClient
 from .integrations.task_cards import cards
@@ -90,6 +90,14 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Auto-Translate-to-News", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def public_boundary(request: Request, call_next):
+    """经内网穿透进来的请求只能访问精校页相关的路径（见 web_auth.py）。"""
+    if web_auth.is_public(request.headers) and not web_auth.public_path_allowed(request.url.path):
+        return Response("Not Found", status_code=404)
+    return await call_next(request)
+
+
 def _require_task(task_id: int) -> Dict[str, Any]:
     task = db.get_task(task_id)
     if task is None:
@@ -118,9 +126,12 @@ async def get_settings():
 
 @app.put("/api/settings")
 async def put_settings(settings: Dict[str, Any]):
+    previous = db.get_settings()
     saved = db.save_settings(settings)
     _configure_browser(saved)
     card_callbacks.start(saved["feishu"])
+    if previous["feishu"].get("public_url") != saved["feishu"].get("public_url"):
+        db.invalidate_cards()  # 已发出的卡片补上 / 更新在线精校按钮
     cards.wake()
     return saved
 
@@ -713,6 +724,9 @@ def _on_bot_message(event: Dict[str, Any]) -> None:
 
 
 card_callbacks = FeishuEventClient(_on_card_action, _on_bot_message)
+
+
+app.include_router(review.router)
 
 
 # ── 前端静态资源（npm run build 后生成 dist/） ─────────────────────────────────

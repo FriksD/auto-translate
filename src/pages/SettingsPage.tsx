@@ -306,6 +306,13 @@ export function SettingsPage() {
             <Field label={settings.feishu.receive_id_type === 'chat_id' ? '群 chat_id' : '用户 open_id'} hint="应用需要先被拉进群，或对该用户可见">
               <Input value={settings.feishu.receive_id} onChange={(e) => patch('feishu', { receive_id: e.target.value })} />
             </Field>
+            <Field label="在线精校地址" hint="内网穿透的公网地址，如 https://xxx.ngrok-free.dev；留空则卡片上没有在线精校按钮">
+              <Input
+                value={settings.feishu.public_url}
+                placeholder="https://"
+                onChange={(e) => patch('feishu', { public_url: e.target.value })}
+              />
+            </Field>
           </div>
           <div className="flex items-center gap-3">
             <Button size="sm" variant="outline" onClick={testFeishu}>

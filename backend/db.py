@@ -244,6 +244,13 @@ def update_card(task_id: int, **fields: Any) -> None:
         _db().commit()
 
 
+def invalidate_cards() -> None:
+    """让所有卡片下次都重算一遍（例如卡片上的链接地址变了）。"""
+    with _lock:
+        _db().execute("UPDATE feishu_cards SET rendered_at = NULL")
+        _db().commit()
+
+
 # ── 术语表 ────────────────────────────────────────────────────────────────────
 
 def list_glossary() -> List[Dict[str, Any]]:
