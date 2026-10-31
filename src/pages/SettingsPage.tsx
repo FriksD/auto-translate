@@ -185,7 +185,7 @@ export function SettingsPage() {
               <option value="cpu">CPU</option>
             </Select>
           </Field>
-          <Field label="计算精度" hint="8GB 显存用 float16 即可；显存紧张选 int8_float16">
+          <Field label="计算精度" hint="推荐 int8_float16：显存占用少一半，速度和效果基本一样；float16 在 8GB 显存上容易挤爆变慢">
             <Select value={settings.whisper.compute_type} onChange={(e) => patch('whisper', { compute_type: e.target.value })}>
               <option value="float16">float16</option>
               <option value="int8_float16">int8_float16</option>

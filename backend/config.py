@@ -37,7 +37,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "whisper": {
         "model": _default_whisper_model(),
         "device": "cuda",
-        "compute_type": "float16",
+        # int8_float16 显存占用少一半（约 3GB），速度和转写结果与 float16 基本一样
+        "compute_type": "int8_float16",
         "language": "",  # 留空自动检测
         "beam_size": 5,
     },

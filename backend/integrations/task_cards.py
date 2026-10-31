@@ -23,6 +23,7 @@ from . import feishu
 logger = logging.getLogger(__name__)
 
 POLL_SECONDS = 3
+MENTION_ALL = '<at user_id="all"></at>'
 # 飞书只允许修改 14 天内发出的卡片，留点余量
 CARD_MAX_AGE = 13.5 * 86400
 
@@ -455,9 +456,9 @@ class TaskCardService:
             return message_id
 
     # 提醒
-    def alert(self, task_id: int, kind: str, body: str = "") -> None:
+    def alert(self, task_id: int, kind: str, body: str = "", mention_all: bool = False) -> None:
         """
-        需要人处理的事：在任务卡片下回复话题（会提醒群成员）。
+        需要人处理的事：在任务卡片下回复话题（会提醒群成员）。mention_all：同时 @所有人（比赛结束、初稿就绪）。
         任务没有卡片或回复失败时，退回发一条普通文本消息。
         """
         settings = db.get_settings()
@@ -467,7 +468,15 @@ class TaskCardService:
         try:
             message_id = self.sync(task_id)
             if message_id:
-                feishu.client_for(settings).reply_text(message_id, text)
+                client = feishu.client_for(settings)
+                if mention_all:
+                    try:
+                        client.reply_text(message_id, f"{MENTION_ALL} {text}")
+                        return
+                    except feishu.FeishuError as error:
+                        # 群里设置了只有群主能 @所有人 等情况：去掉 @ 再发
+                        logger.warning("任务 %s @所有人 失败，改为普通回复：%s", task_id, error)
+                client.reply_text(message_id, text)
                 return
         except Exception as error:
             logger.warning("任务 %s 卡片话题回复失败，改发普通消息：%s", task_id, error)

@@ -7,7 +7,11 @@ import os
 from typing import Optional, Dict, Any, Union, Callable, List
 import torch
 import torchaudio
-from pyannote.audio import Pipeline
+
+# pyannote 4 默认每次运行都经代理上报使用统计，会阻塞几秒；关掉
+os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "false")
+
+from pyannote.audio import Pipeline  # noqa: E402
 from pyannote.core import Annotation, Segment, Timeline
 
 logger = logging.getLogger(__name__)
@@ -62,6 +66,8 @@ class DiarizationService:
 
             # 使用GPU如果可用
             if torch.cuda.is_available():
+                # 声纹模型的输入长度每批都不同，不开 cuDNN 自动调优时 4 分钟的音频要 30 多秒，开了 5 秒
+                torch.backends.cudnn.benchmark = True
                 self.pipeline = self.pipeline.to(torch.device("cuda"))
                 logger.info("说话人分离模型已加载到GPU")
             else:

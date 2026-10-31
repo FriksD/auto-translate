@@ -661,9 +661,9 @@ class LiveManager:
         return f"{config.PUBLIC_URL}/tasks/{task_id}"
 
     @staticmethod
-    def alert(task_id: int, kind: str, body: str = "") -> None:
+    def alert(task_id: int, kind: str, body: str = "", mention_all: bool = False) -> None:
         """需要人处理的事：在任务的飞书卡片下回复话题。其余进展只更新卡片，不单独发消息。"""
-        cards.alert(task_id, kind, body)
+        cards.alert(task_id, kind, body, mention_all)
 
     def is_recording(self, task_id: int) -> bool:
         session = self.sessions.get(task_id)

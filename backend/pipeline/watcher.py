@@ -17,7 +17,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from .. import db
+from .. import config, db
 from ..runner import PipelineRunner, State
 from ..sources.hltv import HLTVClient
 from .live import LiveManager, candidate_streams, load_state, mutate_state, patch_state, pick_stream
@@ -161,8 +161,8 @@ class MatchWatcher:
     def check_soon(self, task_id: int) -> None:
         self._next_check[task_id] = 0
 
-    async def _alert(self, task_id: int, kind: str, body: str = "") -> None:
-        await asyncio.to_thread(self.live.alert, task_id, kind, body)
+    async def _alert(self, task_id: int, kind: str, body: str = "", mention_all: bool = False) -> None:
+        await asyncio.to_thread(self.live.alert, task_id, kind, body, mention_all)
 
     async def _loop(self) -> None:
         while True:
@@ -356,9 +356,10 @@ class MatchWatcher:
         db.update_task(task_id, state=State.INTERVIEW_DETECTING if recording else State.NO_INTERVIEW)
         if recording:
             db.add_event(task_id, f"比赛结束：{summary}，继续监听采访")
+            await self._alert(task_id, "比赛结束", f"{summary}，正在监听赛后采访", mention_all=True)
         else:
             db.add_event(task_id, f"比赛结束：{summary}，但没有在录制（找不到直播源），请手动上传采访音频", level="error")
-            await self._alert(task_id, "比赛结束但没有录到直播", f"{summary}\n请在任务页手动上传采访音频")
+            await self._alert(task_id, "比赛结束但没有录到直播", f"{summary}\n请在任务页手动上传采访音频", mention_all=True)
 
     async def mark_over(self, task_id: int) -> None:
         """人工确认比赛已结束（数据源不可用时）。"""
@@ -380,6 +381,9 @@ class MatchWatcher:
             ended = captured  # 事后补截的旧录音：从截取时刻开始算
         if ended is None or (state.get("notified") or {}).get("deadline"):
             return
+        if any(config.task_dir(task["id"]).glob("*.docx")):
+            return  # 初稿已经出过，现在是人工重跑
+
         late = time.time() - ended
         if late < int(cfg["draft_deadline_minutes"]) * 60:
             return

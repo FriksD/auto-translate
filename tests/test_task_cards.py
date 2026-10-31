@@ -117,6 +117,7 @@ class FakeClient:
     def __init__(self):
         self.sent, self.updates, self.replies, self.files, self.texts = [], [], [], [], []
         self.update_error = None
+        self.reply_error = None
 
     def send_card(self, card):
         self.sent.append(card)
@@ -128,6 +129,8 @@ class FakeClient:
         self.updates.append((message_id, card))
 
     def reply_text(self, message_id, text):
+        if self.reply_error and "user_id=\"all\"" in text:
+            raise self.reply_error
         self.replies.append((message_id, text))
 
     def reply_file(self, message_id, path):
@@ -177,6 +180,17 @@ class CardServiceTest(unittest.TestCase):
         self.service.alert(self.task["id"], "找不到直播源", "请在卡片里填写直播链接")
         self.assertEqual(self.client.replies, [("om_1", "【找不到直播源】请在卡片里填写直播链接")])
         self.assertEqual(self.client.texts, [])
+
+    def test_alert_mention_all(self):
+        self.service.track(self.task["id"])
+        self.service.alert(self.task["id"], "初稿就绪", "", mention_all=True)
+        self.assertEqual(self.client.replies, [("om_1", '<at user_id="all"></at> 【初稿就绪】')])
+
+    def test_alert_mention_all_refused_sends_plain(self):
+        self.client.reply_error = feishu.FeishuError("no permission", 230027)
+        self.service.track(self.task["id"])
+        self.service.alert(self.task["id"], "比赛结束", "A 2:0 B", mention_all=True)
+        self.assertEqual(self.client.replies, [("om_1", "【比赛结束】A 2:0 B")])
 
     def test_alert_without_card_falls_back_to_text(self):
         with unittest.mock.patch.object(feishu, "notify") as notify:

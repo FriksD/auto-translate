@@ -108,7 +108,8 @@ class WhisperService:
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=500),
             condition_on_previous_text=False,
-            batch_size=16,
+            # 8GB 显存上还要放说话人分离模型和桌面程序，批次太大会挤到共享内存里，慢几倍
+            batch_size=8,
         )
 
         total_duration = info.duration or 0

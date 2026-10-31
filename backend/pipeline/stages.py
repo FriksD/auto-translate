@@ -484,7 +484,7 @@ def stage_deliver(task_id: int) -> None:
         if report.get("unknown"):
             lines.append("未收录的英文词：" + "、".join(report["unknown"][:20]))
     # 有任务卡片时提醒和 Word 都发在卡片的话题里，没有时直接发到群里
-    cards.alert(task_id, "初稿就绪", "\n".join(lines))
+    cards.alert(task_id, "初稿就绪", "\n".join(lines), mention_all=True)
     cards.send_file(task_id, docx)
 
 
