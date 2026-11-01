@@ -368,8 +368,13 @@ def _read_json(path: Path) -> Optional[Dict[str, Any]]:
 
 
 def ready_to_send(task: Dict[str, Any]) -> bool:
-    """还没发出的卡片现在该不该发：预约的比赛等开始录制；取消的预约就不发了。"""
-    if task["source_type"] != "live" or task["state"] not in PRE_RECORDING_STATES:
+    """
+    还没发出的卡片现在该不该发：预约的比赛等开始录制；取消的预约就不发了。
+    预约后立即抓背景信息时任务短暂处于排队/处理中（阶段 context），也还没开始录制。
+    """
+    if task["source_type"] != "live":
+        return True
+    if task["state"] not in PRE_RECORDING_STATES and task.get("stage") != "context":
         return True
     from ..pipeline import live
 

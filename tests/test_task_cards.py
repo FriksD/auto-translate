@@ -163,6 +163,9 @@ class CardServiceTest(unittest.TestCase):
         task = db.create_task(title="C vs D", state=State.RESERVED, source_type="live", match_hltv_id="2")
         self.service.track(task["id"])
         self.service.sync_all()
+        # 预约后立即抓背景信息：短暂处于处理中
+        db.update_task(task["id"], state=State.PROCESSING, stage="context")
+        self.service.sync_all()
         db.update_task(task["id"], state=State.WATCHING)
         self.service.sync_all()
         self.assertEqual(self.client.sent, [])
