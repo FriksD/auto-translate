@@ -5,7 +5,7 @@ cd /d "%~dp0"
 
 rem 在线精校地址（设置页「在线精校地址」）：配置了就一起启动 ngrok，输出写到 data\ngrok.log
 set "DOMAIN="
-for /f "delims=" %%i in ('python -c "from backend import db; print((db.get_settings()['feishu'].get('public_url') or '').replace('https://','').replace('http://','').strip('/'))" 2^>nul') do set "DOMAIN=%%i"
+for /f "delims=" %%i in ('python -c "from backend import db; db.init_db(); print((db.get_settings()['feishu'].get('public_url') or '').replace('https://','').replace('http://','').strip('/'))" 2^>nul') do set "DOMAIN=%%i"
 if defined DOMAIN (
     echo Starting ngrok: %DOMAIN%
     start /b "" ngrok http 8000 --url https://%DOMAIN% >data\ngrok.log 2>&1
