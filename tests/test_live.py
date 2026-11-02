@@ -269,6 +269,12 @@ class Bo3Test(unittest.TestCase):
 
 
 class StreamTest(unittest.TestCase):
+    def setUp(self):
+        # 这些测试没有数据库：默认没有别的任务在录
+        patcher = unittest.mock.patch.object(live, "streams_in_use", return_value=set())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_picks_official_stream(self):
         streams = [{"provider": "twitch", "name": "strogo", "country": "Russia", "viewers": 44089, "url": "u1"},
                    {"provider": "youtube", "name": "PGL", "country": "Other", "viewers": 0, "url": "u2"},
@@ -313,6 +319,24 @@ class StreamTest(unittest.TestCase):
         self.assertTrue(live.is_video_link("https://youtu.be/abc"))
         self.assertTrue(live.is_video_link("https://www.youtube.com/live/abc"))
         self.assertFalse(live.is_video_link("https://www.youtube.com/@PGL/live"))
+
+    def test_remembered_and_in_use_streams_lose_to_this_match_streams(self):
+        # 实测 IEM Beijing 2026：A 路在录另一场，这场在 B 路，HLTV 把 B 路标成英国
+        task = {"id": 2, "context": {"match": {"event": "IEM Beijing 2026", "streams": []}}}
+        state = {"streams": [
+            {"provider": "twitch", "name": "ESL TV", "country": "United Kingdom", "viewers": 7000, "url": "https://www.twitch.tv/eslcs"},
+            {"provider": "twitch", "name": "ESL TV B", "country": "United Kingdom", "viewers": 3906, "url": "https://www.twitch.tv/eslcsb"},
+            {"provider": "twitch", "name": "watchfulTV", "country": "Russia", "viewers": 1309, "url": "https://www.twitch.tv/watchfulTV"}]}
+        memory = [{"provider": "twitch", "name": "ESL TV", "country": "Other", "viewers": 0,
+                   "url": "https://www.twitch.tv/eslcs", "source": "memory"}]
+        with unittest.mock.patch.object(live, "remembered_streams", return_value=memory), \
+                unittest.mock.patch.object(live, "streams_in_use", return_value={"https://www.twitch.tv/eslcs"}):
+            merged = live.candidate_streams(task, state)
+            self.assertEqual(live.pick_stream(merged)["url"], "https://www.twitch.tv/eslcsb")
+            self.assertFalse(any(s.get("source") == "memory" for s in merged))
+            # 这场比赛自己没有直播源时才用同一赛事用过的
+            merged = live.candidate_streams(task, {"streams": []})
+            self.assertEqual(live.pick_stream(merged)["source"], "memory")
 
     def test_bad_streams_are_excluded(self):
         task = {"id": 1, "context": {"match": {"streams": []}}}

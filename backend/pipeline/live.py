@@ -107,14 +107,15 @@ def pick_stream(streams: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     选官方直播流：HLTV 上官方流的国家标记是 "Other"（地球图标），其余基本是各国二路解说；
     bo3.gg 的官方英文流也记为 "Other"。同等条件下 Twitch 优先（有纯音频流）、再看来源、观看人数；
     指向具体某场直播的 YouTube 链接（可能已是回放）排在频道链接之后。
-    频道名和赛事主办方对得上的（event_match，见 candidate_streams）最优先：
+    别的比赛正在录的直播源（in_use）排到最后：同一赛事常有 A、B 两路直播同时播两场比赛。
+    频道名和赛事主办方对得上的（event_match，见 candidate_streams）优先：
     HLTV 的 "Other" 也会标在二路解说上（实测 DFRAG 的比赛标给了个人主播 MominPK，官方是 DFragTV）。
     """
     candidates = [s for s in streams if s.get("url") and s.get("provider") in PROVIDER_RANK]
     if not candidates:
         return None
     return min(candidates, key=lambda s: (
-        not s.get("event_match"), s.get("country") != "Other", is_video_link(s["url"]),
+        bool(s.get("in_use")), not s.get("event_match"), s.get("country") != "Other", is_video_link(s["url"]),
         PROVIDER_RANK[s["provider"]], SOURCE_RANK.get(s.get("source") or "hltv", 0), -(s.get("viewers") or 0)))
 
 
@@ -161,19 +162,39 @@ def _stream_key(url: Optional[str]) -> str:
     return (url or "").rstrip("/").lower()
 
 
+def streams_in_use(task_id: int) -> set:
+    """别的直播任务正在录的直播源。"""
+    used = set()
+    for other in db.list_tasks():
+        if other["id"] != task_id and other["source_type"] == "live" and other["state"] in LIVE_STATES:
+            stream = load_state(other["id"]).get("stream") or {}
+            if stream.get("url"):
+                used.add(_stream_key(stream["url"]))
+    return used
+
+
 def candidate_streams(task: Dict[str, Any], state: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    可选的直播源：当前数据源给的 + 预约时 HLTV 页面上的 + 同一赛事用过的，按 URL 去重。
+    可选的直播源：当前数据源给的 + 预约时 HLTV 页面上的，按 URL 去重；这两处都没有可用的才用同一赛事用过的。
+    实测 IEM Beijing 2026：A、B 两路直播同时播两场，HLTV 把 B 路标成英国（不是 Other），
+    "用过的" A 路排到了前面，HEROIC vs B8 录成了另一场比赛。
     录制时发现不是直播（回放）的直播源记在 bad_streams 里，不再选。
     """
     match = (task.get("context") or {}).get("match") or {}
     keywords = event_keywords(match.get("event"))
+    used = streams_in_use(task["id"])
     merged, seen = [], {_stream_key(url) for url in state.get("bad_streams") or []}
-    for stream in list(state.get("streams") or []) + (match.get("streams") or []) + remembered_streams(task):
-        key = _stream_key(stream.get("url"))
-        if key and key not in seen:
-            seen.add(key)
-            merged.append({**stream, "event_match": stream_matches_event(stream, keywords)})
+
+    def add(streams: List[Dict[str, Any]]) -> None:
+        for stream in streams:
+            key = _stream_key(stream.get("url"))
+            if key and key not in seen:
+                seen.add(key)
+                merged.append({**stream, "event_match": stream_matches_event(stream, keywords), "in_use": key in used})
+
+    add(list(state.get("streams") or []) + (match.get("streams") or []))
+    if not any(s.get("provider") in PROVIDER_RANK for s in merged):
+        add(remembered_streams(task))
     return merged
 
 

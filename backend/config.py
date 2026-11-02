@@ -80,7 +80,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         # 比赛结束后多久还没发现采访就提醒（分钟）
         "alert_no_interview_minutes": 10,
         # 比赛结束后多久仍未发现采访就判定为无采访（分钟）
-        "max_post_match_minutes": 30,
+        "max_post_match_minutes": 20,
         # 采访开始后多久仍未判定结束就直接截取（分钟）
         "max_interview_minutes": 10,
         # 截取采访时前后各留的余量（秒）
