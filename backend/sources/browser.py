@@ -224,11 +224,13 @@ class BrowserFetcher:
                 page.goto(url, wait_until="domcontentloaded")
                 self._wait_challenge(page, url)
                 self._watched[key] = (page, time.time())
-                # 进行中的比赛等实时比分板连上 scorebot
+                # 进行中的比赛等实时比分板连上 scorebot。比分板的框架（「R: -」占位）随页面就有，
+                # 要等比分真的填进来（实测连上后 2～4 秒）；只等框架出现就读，读到的永远是空比分板
                 if (page.evaluate("() => document.querySelector('.countdown')?.textContent || ''") or "").strip().upper() == "LIVE":
                     try:
-                        page.wait_for_selector(".scoreboard .currentRoundText", state="attached",
-                                               timeout=SCOREBOARD_WAIT_MS)
+                        page.wait_for_function(
+                            "() => (document.querySelector('.scoreboard .ctScore')?.textContent || '').trim() !== ''",
+                            timeout=SCOREBOARD_WAIT_MS)
                     except Exception:
                         logger.info("实时比分板未出现（可能在换图间隙）: %s", url)
             return page.content(), self._watched[key][1]
