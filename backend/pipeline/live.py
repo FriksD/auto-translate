@@ -147,10 +147,15 @@ def _alnum(text: Any) -> str:
     return "".join(ch for ch in str(text or "").lower() if ch.isalnum())
 
 
+# 赛事品牌 → 官方直播频道名里的词（IEM 的官方流是 ESL TV / ESL TV B）
+ORGANIZER_CHANNELS = {"iem": "esl", "intel": "esl", "esl": "esl"}
+
+
 def event_keywords(event: Optional[str]) -> List[str]:
     """赛事名里可能是主办方/品牌的词：DFRAG Invitational 2026 → [dfrag]；PGL Masters Bucharest → [pgl, bucharest]"""
     words = [_alnum(w) for w in str(event or "").split()]
-    return [w for w in words if len(w) >= 3 and not w.isdigit() and w not in EVENT_STOPWORDS]
+    keywords = [w for w in words if len(w) >= 3 and not w.isdigit() and w not in EVENT_STOPWORDS]
+    return keywords + [ORGANIZER_CHANNELS[w] for w in words if w in ORGANIZER_CHANNELS]
 
 
 def stream_matches_event(stream: Dict[str, Any], keywords: List[str]) -> bool:

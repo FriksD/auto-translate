@@ -334,6 +334,10 @@ class StreamTest(unittest.TestCase):
             merged = live.candidate_streams(task, state)
             self.assertEqual(live.pick_stream(merged)["url"], "https://www.twitch.tv/eslcsb")
             self.assertFalse(any(s.get("source") == "memory" for s in merged))
+            # 人气更高的 Twitch 二路解说也比不过官方的 ESL 频道
+            state["streams"].append({"provider": "twitch", "name": "gaules", "country": "Brazil", "viewers": 40000,
+                                     "url": "https://www.twitch.tv/gaules"})
+            self.assertEqual(live.pick_stream(live.candidate_streams(task, state))["url"], "https://www.twitch.tv/eslcsb")
             # 这场比赛自己没有直播源时才用同一赛事用过的
             merged = live.candidate_streams(task, {"streams": []})
             self.assertEqual(live.pick_stream(merged)["source"], "memory")
