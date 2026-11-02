@@ -159,7 +159,7 @@ class CardServiceTest(unittest.TestCase):
         db._conn.close()
         self.tmp.cleanup()
 
-    def test_reserved_card_waits_for_recording(self):
+    def test_reserved_card_waits_for_match_start(self):
         task = db.create_task(title="C vs D", state=State.RESERVED, source_type="live", match_hltv_id="2")
         self.service.track(task["id"])
         self.service.sync_all()
@@ -167,10 +167,20 @@ class CardServiceTest(unittest.TestCase):
         db.update_task(task["id"], state=State.PROCESSING, stage="context")
         self.service.sync_all()
         db.update_task(task["id"], state=State.WATCHING)
+        live.patch_state(task["id"], snapshot={"status": "upcoming"})
         self.service.sync_all()
         self.assertEqual(self.client.sent, [])
         live.patch_state(task["id"], recording={"started_at": time.time()})
         db.update_task(task["id"], state=State.RECORDING)
+        self.service.sync_all()
+        self.assertEqual(len(self.client.sent), 1)
+
+    def test_watching_card_sent_when_match_goes_live(self):
+        task = db.create_task(title="C vs D", state=State.WATCHING, source_type="live", match_hltv_id="2")
+        self.service.track(task["id"])
+        self.service.sync_all()
+        self.assertEqual(self.client.sent, [])
+        live.patch_state(task["id"], snapshot={"status": "live"})
         self.service.sync_all()
         self.assertEqual(len(self.client.sent), 1)
 

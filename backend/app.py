@@ -685,7 +685,7 @@ def _on_card_action(value: Dict[str, Any], form: Dict[str, Any], operator: str, 
 
 # ── 飞书机器人命令（群里 @机器人 或私聊） ─────────────────────────────────────
 
-RESERVED_REPLY = "已预约 {title}，开始录制时进度卡片会发到群里；在赛程卡片上可以取消预约"
+RESERVED_REPLY = "已预约 {title}，比赛开打后进度卡片会发到群里；在赛程卡片上可以取消预约"
 
 
 def _command_allowed(event: Dict[str, Any], feishu_settings: Dict[str, Any]) -> bool:

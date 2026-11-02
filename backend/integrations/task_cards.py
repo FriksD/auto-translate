@@ -2,7 +2,7 @@
 飞书群里"一个任务一张卡片"。
 
 - 任务创建（预约比赛、新建任务）时登记，卡片服务在后台发出卡片，记下 message_id。
-  预约的比赛等到开始录制才发卡片（预约一多，赛前的卡片会把群里的消息冲掉）；
+  预约的比赛等到比赛开打才发卡片（预约一多，赛前的卡片会把群里的消息冲掉）；
   赛前就需要人处理（找不到直播源等）时随提醒一起发出。
 - 卡片内容完全由任务当前状态算出来（build_card 是纯函数），后台每隔几秒重算一次，
   内容有变化就整张替换。更新卡片不会提醒群成员，所以主聊天里一场比赛始终只有一条消息。
@@ -50,7 +50,7 @@ QUIET_STATES = (State.REVIEW, State.DONE, State.FAILED, State.NO_INTERVIEW, Stat
 ACTIVE_STATES = (State.RESERVED, State.WATCHING, State.RECORDING, State.INTERVIEW_DETECTING,
                  State.QUEUED, State.PROCESSING)
 
-# 直播任务在这些状态下还没开始录制，先不发卡片
+# 直播任务在这些状态下可能还没开打，先不发卡片
 PRE_RECORDING_STATES = (State.RESERVED, State.WATCHING, State.CANCELLED)
 
 LIVE_STEPS = ["预约", "监视", "录制", "采访", "初稿", "精校"]
@@ -369,8 +369,8 @@ def _read_json(path: Path) -> Optional[Dict[str, Any]]:
 
 def ready_to_send(task: Dict[str, Any]) -> bool:
     """
-    还没发出的卡片现在该不该发：预约的比赛等开始录制；取消的预约就不发了。
-    预约后立即抓背景信息时任务短暂处于排队/处理中（阶段 context），也还没开始录制。
+    还没发出的卡片现在该不该发：预约的比赛等比赛开打（或开始录制）；取消的预约就不发了。
+    预约后立即抓背景信息时任务短暂处于排队/处理中（阶段 context），也还没开打。
     """
     if task["source_type"] != "live":
         return True
@@ -378,7 +378,9 @@ def ready_to_send(task: Dict[str, Any]) -> bool:
         return True
     from ..pipeline import live
 
-    return task["state"] != State.CANCELLED and bool(live.load_state(task["id"]).get("recording"))
+    state = live.load_state(task["id"])
+    started = (state.get("snapshot") or {}).get("status") in ("live", "over")
+    return task["state"] != State.CANCELLED and bool(state.get("recording") or started)
 
 
 def render(task: Dict[str, Any], reserved_by: Optional[str] = None) -> Dict[str, Any]:

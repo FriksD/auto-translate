@@ -54,6 +54,14 @@ class ParseLiveTest(unittest.TestCase):
         self.assertEqual(P.parse_scoreboard(html), {
             "round": 4, "map": "Mirage", "ct": {"team": "fnatic", "score": 2}, "t": {"team": "MIBR", "score": 1}})
 
+    def test_only_first_unfinished_map_is_live(self):
+        # 第一张图还在打时，第二张图（非决胜的选图）也带 played
+        html = fixture("match_live").replace("results-left won pick", "results-left tie pick", 1).replace(
+            "results-right lost", "results-right tie", 1)
+        match = P.parse_match(html)
+        self.assertEqual([(m["name"], m["status"]) for m in match["maps"]],
+                         [("Ancient", "live"), ("Mirage", "upcoming"), ("Anubis", "upcoming")])
+
     def test_finished_page_has_no_scoreboard(self):
         html = fixture("match_over_bo3")
         match = P.parse_match(html)

@@ -202,6 +202,14 @@ def parse_match(html: str) -> Dict[str, Any]:
             "winner": winner,
         })
 
+    # 「played」只表示这张图要打（不是决胜的备选图），没开打的也带：只有第一张没分出胜负的才是正在打
+    live_seen = False
+    for m in maps:
+        if m["status"] == "live":
+            if live_seen:
+                m["status"] = "upcoming"
+            live_seen = True
+
     lineups = [_parse_lineup(l) for l in soup.select(".lineups .lineup")]
     for team, lineup in zip(teams, lineups):
         team.update({k: lineup[k] for k in ("hltv_rank", "vrs_rank", "players")})
