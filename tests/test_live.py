@@ -547,6 +547,13 @@ class CameraDetectTest(unittest.TestCase):
         capture = self.run_detect(spec, [answer, answer])
         capture.assert_not_called()
 
+    def test_other_teams_interview_is_ignored(self):
+        # 实测 HEROIC vs B8：同一路直播后来播了下一场 Aurora 选手的赛前采访
+        spec = [(t, "desk") for t in range(600, 700, 5)] + [(t, "interview") for t in range(700, 925, 5)]
+        spec += [(t, "desk") for t in range(925, 1000, 5)]
+        capture = self.run_detect(spec, [{"started": True, "start": "11:30", "ended": False, "team": "other"}])
+        capture.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

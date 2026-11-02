@@ -278,11 +278,12 @@ Transcript:
 A post-match interview is a host or interviewer asking a player (or coach) of these teams questions and the player answering, usually right after the match, sometimes with a translator. Casters' analysis, replays, ads, desk talk between analysts and the next match are NOT the interview.
 
 Answer with JSON:
-{{"started": bool, "start": "mm:ss" or null, "ended": bool, "end": "mm:ss" or null, "interviewee": player name or null, "confidence": 0.0-1.0, "note": short reason}}
+{{"started": bool, "start": "mm:ss" or null, "ended": bool, "end": "mm:ss" or null, "interviewee": player name or null, "team": the interviewee's team (one of the two teams above), "other" or null, "confidence": 0.0-1.0, "note": short reason}}
 
 Rules:
 - "start" is the timestamp of the line where the interviewer starts (greeting or first question).
 - Set "ended" true only if the transcript clearly continues with other content after the interview (casters or analysts talking among themselves, ads, next segment). Questions from the interviewer, even about the next match, are still part of the interview. If the interviewer brings in another player (e.g. "X, come here"), the interview continues. If the transcript ends while the interview may still be going, set "ended" false. "end" is the last line of the interview.
+- The interview must be with a player or coach of one of the two teams above. The broadcast often continues with other content on the same stream: pre-match interviews or features with players of the NEXT match, other teams' players at the desk. If the interviewee clearly belongs to another team (judge from the rosters and what they talk about: their own team, lineup, opponents), set "team" to "other" and started=false. If you cannot tell yet, use null.
 - If no interview is visible yet, return started=false."""
 
 

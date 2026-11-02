@@ -640,6 +640,10 @@ class LiveSession:
                                    f"\n请检查 LLM 设置，或在任务页手动标注采访起止")
             return
 
+        # 别的队的选手（下一场的赛前采访等）：不是这场的采访。实测 IEM Beijing 2026 HEROIC vs B8，
+        # B 路赛后没有采访，十几分钟后播了下一场 Aurora 选手的赛前采访，被当成了这场的采访
+        if str(answer.get("team") or "").strip().lower() == "other":
+            answer = {**answer, "started": False}
         start = prompts.parse_clock(answer.get("start"))
         if answer.get("started") and start is None:
             # "录音开始时采访已经在进行"：沿用之前判定的起点，没有就取窗口开头
