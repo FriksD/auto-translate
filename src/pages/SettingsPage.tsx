@@ -67,7 +67,7 @@ export function SettingsPage() {
     return error ? <ErrorText>{error}</ErrorText> : <Loader2 className="mx-auto mt-20 h-6 w-6 animate-spin" />
   }
 
-  type Section = 'hltv' | 'whisper' | 'diarization' | 'llm' | 'live' | 'feishu'
+  type Section = 'hltv' | 'whisper' | 'diarization' | 'llm' | 'live' | 'feishu' | 'package'
   const patch = <K extends Section>(key: K, value: Partial<Settings[K]>) =>
     setSettings({ ...settings, [key]: { ...settings[key], ...value } })
 
@@ -276,6 +276,36 @@ export function SettingsPage() {
           <p className="text-xs text-muted-foreground">
             时效：录音分段和判断间隔越短，采访结束后越快被发现（默认 30 秒 / 30 秒，实测约 2 分钟内截取），后处理约 1～3 分钟。
           </p>
+        </div>
+      </Card>
+
+      <Card>
+        <CardTitle>投稿信息</CardTitle>
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            初稿发出后自动生成推荐标题、摘要和封面候选，发到卡片的话题里，在线精校页上也能改选和一键复制。下面每行一条。
+          </p>
+          <Field label="标题范例" hint="最近发过的标题，新的在前；在线精校定稿时选用的标题会自动加到最前面（最多保留 30 条）">
+            <Textarea
+              rows={6}
+              value={settings.package.title_examples.join('\n')}
+              onChange={(e) => patch('package', { title_examples: e.target.value.split('\n') })}
+            />
+          </Field>
+          <Field label="摘要范例" hint="摘要照这些的格式写；定稿时选用的摘要同样会加进来（最多 6 条）">
+            <Textarea
+              rows={4}
+              value={settings.package.summary_examples.join('\n')}
+              onChange={(e) => patch('package', { summary_examples: e.target.value.split('\n') })}
+            />
+          </Field>
+          <Field label="采访主持人" hint="「赛事关键词=主持人」按赛事名匹配，如 PGL=BanKs；只写名字的帮助从稿件里认人。认不出主持人时摘要写「接受了采访」">
+            <Textarea
+              rows={3}
+              value={settings.package.hosts.join('\n')}
+              onChange={(e) => patch('package', { hosts: e.target.value.split('\n') })}
+            />
+          </Field>
         </div>
       </Card>
 

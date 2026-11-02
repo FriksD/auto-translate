@@ -521,5 +521,23 @@ class TaskCardService:
         else:
             client.send_file(path)
 
+    def send_image(self, task_id: int, path: Path) -> None:
+        """同 send_file，发图片。"""
+        client = feishu.client_for(db.get_settings())
+        message_id = self.sync(task_id, force=True)
+        if message_id:
+            client.reply_image(message_id, path)
+        else:
+            client.send_image(path)
+
+    def send_text(self, task_id: int, text: str) -> None:
+        """在话题里发一条纯文本（不加【】前缀，方便长按整条复制）。失败时抛出异常。"""
+        client = feishu.client_for(db.get_settings())
+        message_id = self.sync(task_id, force=True)
+        if message_id:
+            client.reply_text(message_id, text)
+        else:
+            client.send_text(text)
+
 
 cards = TaskCardService()

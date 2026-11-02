@@ -1,7 +1,7 @@
 // 在线精校页：手机上在飞书里打开，听采访音频、对照英文改中文稿，任何一人都可以定稿
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, Loader2, Pause, Play, RotateCcw, RotateCw, Trash2 } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, Copy, Loader2, Pause, Play, RefreshCw, RotateCcw, RotateCw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { formatSeconds, STATE_COLORS, STATE_LABELS } from '@/lib/api'
@@ -23,8 +23,18 @@ interface ReviewData {
   suspects: { token: string; candidates: string[] }[]
   unknown: string[]
   finalized: { by: string; at: number } | null
+  package: PackageData
   user?: { name: string }
   sent?: boolean
+}
+
+interface PackageData {
+  status: 'none' | 'running' | 'done'
+  titles: string[]
+  title: string
+  summary: string
+  covers: { file: string; source: string; label: string; url: string }[]
+  warnings: string[]
 }
 
 class HttpError extends Error {
@@ -146,6 +156,12 @@ export function ReviewPage() {
       <Player id={id} data={data}>
         {(currentTime, seek) => (
           <div className="space-y-3 px-3 pt-3">
+            <PackagePanel
+              id={id}
+              value={data.package}
+              onChange={(value) => setData((previous) => previous && { ...previous, package: value })}
+              onToast={setToast}
+            />
             <ReviewNotes data={data} showEnglish={showEnglish} onToggleEnglish={() => setShowEnglish(!showEnglish)} />
             {error && <p className="text-xs text-destructive">刷新失败：{error}</p>}
             {!data.editable && (
@@ -324,6 +340,174 @@ function ReviewNotes({ data, showEnglish, onToggleEnglish }: {
           {showEnglish ? '隐藏英文' : '显示英文'}
         </button>
       </div>
+    </div>
+  )
+}
+
+// 先用同步的 execCommand（必须在点击的那一刻执行，飞书内置浏览器里最可靠），不行再试剪贴板接口
+async function copyText(text: string) {
+  const element = document.createElement('textarea')
+  element.value = text
+  element.setAttribute('readonly', '')
+  element.style.position = 'fixed'
+  element.style.opacity = '0'
+  document.body.appendChild(element)
+  element.select()
+  element.setSelectionRange(0, text.length)
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } catch {
+    ok = false
+  }
+  document.body.removeChild(element)
+  if (ok) return
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    throw new Error('浏览器不允许复制，请长按文字手动复制')
+  }
+}
+
+// 投稿信息：推荐标题、摘要、封面候选，改完自动保存，一键复制
+function PackagePanel({ id, value, onChange, onToast }: {
+  id: number
+  value: PackageData
+  onChange: (value: PackageData) => void
+  onToast: (text: string) => void
+}) {
+  const [open, setOpen] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  const save = async (patch: { title?: string; summary?: string }) => {
+    try {
+      onChange(await call<PackageData>('PUT', `/api/review/${id}/package`, patch))
+    } catch (e) {
+      onToast(`保存失败：${(e as Error).message}`)
+    }
+  }
+
+  const regenerate = async () => {
+    if (value.status === 'done' && !window.confirm('重新生成标题、摘要和封面候选？改过的标题和摘要会被替换')) return
+    setBusy(true)
+    try {
+      onChange(await call<PackageData>('POST', `/api/review/${id}/package/regenerate`))
+      onToast('正在生成，大约需要 1～2 分钟')
+    } catch (e) {
+      onToast(`生成失败：${(e as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const copy = async (text: string, what: string) => {
+    try {
+      await copyText(text)
+      onToast(`已复制${what}`)
+    } catch (e) {
+      onToast((e as Error).message)
+    }
+  }
+
+  const running = value.status === 'running'
+  return (
+    <div className="rounded-lg border bg-muted/30">
+      <button className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium" onClick={() => setOpen(!open)}>
+        投稿信息
+        {running && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        <span className="truncate text-xs font-normal text-muted-foreground">
+          {value.status === 'none' ? '还没有生成' : running ? '生成中…' : '标题、摘要、封面候选'}
+        </span>
+        <ChevronDown className={cn('ml-auto h-4 w-4 shrink-0 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="space-y-3 border-t px-3 pb-3 pt-2">
+          {value.warnings.length > 0 && (
+            <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs leading-relaxed text-amber-900">{value.warnings.join('；')}</p>
+          )}
+          {(value.titles.length > 0 || value.title) && (
+            <CopyField label="标题" value={value.title} rows={2} onSave={(title) => save({ title })} onCopy={(text) => copy(text, '标题')}>
+              {value.titles.length > 1 && (
+                <div className="mt-1.5 space-y-1">
+                  {value.titles.map((title) => (
+                    <button
+                      key={title}
+                      className={cn(
+                        'flex w-full items-start gap-1.5 rounded border px-2 py-1 text-left text-[13px] leading-snug',
+                        title === value.title ? 'border-primary/60 bg-primary/5' : 'bg-background',
+                      )}
+                      onClick={() => title !== value.title && save({ title })}
+                    >
+                      <Check className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', title === value.title ? 'text-primary' : 'text-transparent')} />
+                      {title}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CopyField>
+          )}
+          {value.summary && (
+            <CopyField label="摘要" value={value.summary} rows={4} onSave={(summary) => save({ summary })} onCopy={(text) => copy(text, '摘要')} />
+          )}
+          {value.covers.length > 0 && (
+            <div>
+              <p className="mb-1 text-xs text-muted-foreground">封面候选（点开看原图，长按保存）</p>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {value.covers.map((cover) => (
+                  <a key={cover.file} href={cover.url} target="_blank" rel="noreferrer" className="w-40 shrink-0">
+                    <img src={cover.url} alt={cover.label} loading="lazy" className="aspect-video w-full rounded bg-muted object-cover" />
+                    <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{cover.label}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+          <Button size="sm" variant="outline" className="h-7" disabled={busy || running} onClick={regenerate}>
+            {busy || running ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
+            {value.status === 'none' ? '生成投稿信息' : '重新生成'}
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CopyField({ label, value, rows, onSave, onCopy, children }: {
+  label: string
+  value: string
+  rows: number
+  onSave: (text: string) => Promise<void>
+  onCopy: (text: string) => void
+  children?: React.ReactNode
+}) {
+  const [text, setText] = useState(value)
+  const editing = useRef(false)
+  // 别人改了、或在候选里点了另一个标题：没在编辑就跟上
+  useEffect(() => {
+    if (!editing.current) setText(value)
+  }, [value])
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center text-xs text-muted-foreground">
+        {label}
+        <Button size="sm" variant="ghost" className="ml-auto h-6 px-2 text-xs" onClick={() => onCopy(text)}>
+          <Copy className="mr-1 h-3.5 w-3.5" />
+          复制
+        </Button>
+      </div>
+      <textarea
+        className="block w-full resize-none rounded-md border border-input bg-background px-2.5 py-2 text-[15px] leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        rows={rows}
+        value={text}
+        onFocus={() => (editing.current = true)}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          editing.current = false
+          if (text.trim() && text !== value) onSave(text)
+        }}
+      />
+      {children}
     </div>
   )
 }

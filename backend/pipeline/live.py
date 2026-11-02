@@ -6,6 +6,7 @@
 - 工作线程把新写完的分段逐个转写，追加到 live_transcript.jsonl，时间为"相对录制开始的秒数"。
 - 录制期间每有新的转写、且距上次判断超过 detect_interval 秒，就把最近 15 分钟的转写交给 LLM，
   判断采访是否开始、是否结束。不等"比赛结束"信号：数据源慢了或挂了也不耽误发现采访。
+- 采访期间另外截几张高清画面（stills/），做投稿封面的候选。
 - 连续两次判断都认为采访已结束（结束时间一致）后截取 interview.wav，停止录音，从「获取音频」开始跑流水线；
   人工标注起止、或采访超时也会截取。
 
@@ -27,7 +28,7 @@ from .. import config, db
 from ..integrations.task_cards import cards
 from ..runner import State
 from . import prompts
-from .recorder import SAMPLE_RATE, Recorder, chunk_duration, chunk_start, frame_time, read_pcm
+from .recorder import FRAME_PATTERN, SAMPLE_RATE, Recorder, chunk_duration, chunk_start, frame_time, grab_still, read_pcm
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,12 @@ ENDING_TOLERANCE = 45
 ENDING_MARGIN = 60
 # 一直收不到比赛结束信号时，录制最长多久
 MAX_RECORDING_HOURS = 6
+# 采访期间截高清画面（封面候选，存在 stills/）：间隔、最多几张、连续失败几次就不再截
+STILL_INTERVAL = 25
+MAX_STILLS = 10
+STILL_MAX_FAILURES = 3
+# 镜头识别出的采访画面在多少秒以内，算"现在是采访镜头"
+STILL_SHOT_RECENT = 60
 # 人工点「本场无采访」时的原因（不用再提醒）
 MANUAL_NO_INTERVIEW = "人工确认本场无采访"
 
@@ -270,13 +277,16 @@ def frame_timeline(frames: List[Path], origin: float) -> List[Tuple[Path, float]
     return [(frame, frame_time(frame) - origin) for frame in sorted(frames)]
 
 
-def make_sheet(frames: List[Tuple[Path, float]]) -> bytes:
-    """把最多 9 帧拼成 3×3 的图，每格左上角标时间（mm:ss，相对录制开始）。"""
+def make_sheet(frames: List[Tuple[Path, float]], max_width: Optional[int] = None) -> bytes:
+    """把最多 9 帧拼成 3×3 的图，每格左上角标时间（mm:ss，相对录制开始）。max_width：先把每帧缩到这个宽度以内。"""
     from io import BytesIO
 
     from PIL import Image, ImageDraw, ImageFont
 
     images = [Image.open(path).convert("RGB") for path, _ in frames]
+    if max_width:
+        for image in images:
+            image.thumbnail((max_width, max_width))
     width = max(image.width for image in images)
     height = max(image.height for image in images)
     rows = (len(images) + SHEET_COLUMNS - 1) // SHEET_COLUMNS
@@ -362,6 +372,9 @@ class LiveSession:
         # 转写一个分段（含写入转写稿）和丢弃回放分段互斥
         self._chunk_lock = threading.Lock()
         self._shot_failures = 0
+        self._still_thread: Optional[threading.Thread] = None
+        self._still_failures = 0
+        self._still_last = 0.0
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -440,6 +453,7 @@ class LiveSession:
                 if self._stop.is_set():
                     break
                 self._classify_frames()
+                self._grab_still()
                 self._detect()
                 self._check_timeouts()
             except Exception:
@@ -486,6 +500,44 @@ class LiveSession:
             with open(self.workdir / "shots.jsonl", "a", encoding="utf-8") as fh:
                 for (frame, t), label in zip(batch, labels):
                     fh.write(json.dumps({"file": frame.name, "t": round(t, 1), "label": label}) + "\n")
+
+    # 封面候选
+    def _grab_still(self) -> None:
+        """判定采访已开始、或镜头识别最近是采访画面时，隔一会儿在后台截一张最高画质的画面。"""
+        if (self._still_thread and self._still_thread.is_alive()) or self._still_failures >= STILL_MAX_FAILURES:
+            return
+        if time.time() - self._still_last < STILL_INTERVAL or not self.recorder.running:
+            return
+        still_dir = self.workdir / "stills"
+        if still_dir.exists() and len(list(still_dir.glob("f_*.jpg"))) >= MAX_STILLS:
+            return
+        state = load_state(self.task_id)
+        if state.get("stream_down_since") or db.get_task(self.task_id)["state"] not in LIVE_STATES:
+            return
+        shots = read_shots(self.task_id)
+        latest = shots[-1] if shots else None
+        on_camera = bool(latest and latest["label"] == "interview"
+                         and time.time() - state["recording"]["started_at"] - latest["t"] < STILL_SHOT_RECENT)
+        if not (on_camera or (state.get("detection") or {}).get("started")):
+            return
+        self._still_last = time.time()
+        still_dir.mkdir(exist_ok=True)
+        output = still_dir / time.strftime(FRAME_PATTERN)
+        settings = db.get_settings()
+
+        def grab() -> None:
+            try:
+                grab_still(self.recorder.url, output, config.resolve_ffmpeg(settings), config.proxy_or_none(settings))
+                self._still_failures = 0
+            except Exception as error:
+                self._still_failures += 1
+                logger.warning("任务 %s 截取高清画面失败（第 %s 次）：%s", self.task_id, self._still_failures, error)
+                if self._still_failures == STILL_MAX_FAILURES:
+                    db.add_event(self.task_id, f"截取高清画面连续失败，本场不再截取（封面只能用 HLTV 的图）：{error}",
+                                 level="warning")
+
+        self._still_thread = threading.Thread(target=grab, name=f"still-{self.task_id}", daemon=True)
+        self._still_thread.start()
 
     # 滚动转写
     def _transcribe_new(self) -> None:

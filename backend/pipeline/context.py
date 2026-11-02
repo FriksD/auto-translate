@@ -26,7 +26,7 @@ def _team_entry(name: str, team_id: Optional[int], players: List[Dict[str, Any]]
         "name": name,
         "players": [p["name"] for p in players],
         "player_details": [
-            {k: p.get(k, "") for k in ("name", "real_name", "nationality", "standin_for")} for p in players
+            {k: p.get(k, "") for k in ("id", "name", "real_name", "nationality", "standin_for")} for p in players
         ],
         "stats": {},
     }

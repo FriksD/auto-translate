@@ -106,11 +106,24 @@ class FeishuClient:
             ))
         return data["data"]["file_key"]
 
+    def _upload_image(self, path: Path) -> str:
+        with self._client() as client, open(path, "rb") as fh:
+            data = self._check(client.post(
+                "/im/v1/images",
+                headers=self._headers(),
+                data={"image_type": "message"},
+                files={"image": (path.name, fh)},
+            ))
+        return data["data"]["image_key"]
+
     def send_text(self, text: str) -> None:
         self._send("text", {"text": text})
 
     def send_file(self, path: Path) -> None:
         self._send("file", {"file_key": self._upload_file(path)})
+
+    def send_image(self, path: Path) -> None:
+        self._send("image", {"image_key": self._upload_image(path)})
 
     def send_card(self, card: Dict[str, Any]) -> str:
         return self._send("interactive", card)
@@ -132,6 +145,9 @@ class FeishuClient:
 
     def reply_file(self, message_id: str, path: Path) -> None:
         self._reply(message_id, "file", {"file_key": self._upload_file(path)})
+
+    def reply_image(self, message_id: str, path: Path) -> None:
+        self._reply(message_id, "image", {"image_key": self._upload_image(path)})
 
 
 _clients: Dict[tuple, FeishuClient] = {}

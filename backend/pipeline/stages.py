@@ -23,7 +23,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .. import config, db, llm
 from ..integrations.task_cards import cards, review_url
@@ -455,7 +455,17 @@ def _live_turnaround(task: Dict[str, Any]) -> Optional[str]:
             f"（发现并截取用时 {max(0.0, captured - ended) / 60:.1f} 分钟，处理用时 {(time.time() - captured) / 60:.1f} 分钟）")
 
 
+# 初稿发出后的回调（生成投稿信息），由 app 启动时设置
+on_delivered: Optional[Callable[[int], Any]] = None
+
+
 def stage_deliver(task_id: int) -> None:
+    _deliver(task_id)
+    if on_delivered:
+        on_delivered(task_id)
+
+
+def _deliver(task_id: int) -> None:
     task = _task(task_id)
     settings = db.get_settings()
     turnaround = _live_turnaround(task)

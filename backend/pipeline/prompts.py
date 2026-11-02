@@ -5,7 +5,7 @@
 第二步（write）：中文成稿——翻译润色为中文电竞媒体风格的 Q：/A： 问答稿。
 """
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 BEIJING = timezone(timedelta(hours=8))
 
@@ -316,3 +316,80 @@ def format_shot_runs(runs: List[Dict[str, Any]]) -> str:
     return ("\nCamera: an interview shot (host with microphone and player) is on screen from "
             + "; ".join(parts) + ". Use it to place the start and end, but the transcript decides who is "
             "talking and whether it is a live post-match interview.\n")
+
+
+# ── 投稿信息（标题、摘要） ────────────────────────────────────────────────────
+
+PACKAGE_SYSTEM = (
+    "你是一位深耕CS2电竞领域多年的资深新闻编辑，负责给中文电竞媒体的赛后采访稿拟标题、写导语。"
+    "你只输出严格的 JSON。"
+)
+
+
+def _format_facts(facts: Dict[str, Any]) -> str:
+    lines = [f"赛事（英文）：{facts.get('event') or '未知'}"]
+    if facts.get("stage"):
+        lines.append(f"赛段：{facts['stage']}" + (f"（BO{facts['best_of']}）" if facts.get("best_of") else ""))
+    teams = facts.get("teams") or []
+    if len(teams) == 2:
+        lines.append(f"对阵：{teams[0]} vs {teams[1]}")
+    if facts.get("winner") and facts.get("score"):
+        lines.append(f"结果：{facts['winner']} {facts['score']} 击败 {facts['loser']}")
+    else:
+        lines.append("结果：比分未知（不要编造比分，摘要里可以不写比分）")
+    if facts.get("maps"):
+        lines.append("各图：" + "；".join(facts["maps"]))
+    if facts.get("date"):
+        lines.append(f"比赛日期：{facts['date']}（北京时间）")
+    if facts.get("just_ended"):
+        lines.append("比赛刚刚结束（直播中录到的采访），摘要可以用「就在刚刚」")
+    if facts.get("interviewee_guess"):
+        lines.append(f"直播判断的受访者：{facts['interviewee_guess']}（可能不准，以稿件为准）")
+    return "\n".join(lines)
+
+
+def build_package_prompt(facts: Dict[str, Any], draft: str, title_examples: List[str], summary_examples: List[str],
+                         event_terms: List[Tuple[str, str]], host: Optional[str], host_names: List[str]) -> str:
+    titles = "\n".join(f"- {t}" for t in title_examples) or "（无）"
+    summaries = "\n".join(f"- {t}" for t in summary_examples) or "（无）"
+    terms = "\n".join(f"- {en} → {zh}" for en, zh in event_terms) or "（术语表里没有，请自己翻译）"
+    if host:
+        host_line = f"这项赛事的采访主持人一般是 {host}；稿件里能看出是别人时以稿件为准。"
+    elif host_names:
+        host_line = f"常见主持人：{'、'.join(host_names)}。稿件里能看出主持人是谁就写，看不出就写「接受了采访」，不要猜。"
+    else:
+        host_line = "稿件里能看出主持人是谁就写，看不出就写「接受了采访」，不要猜。"
+    return f"""为下面这篇 CS2 赛后采访的中文稿拟投稿用的标题和摘要。
+
+【比赛事实】（比分、队名以此为准，不要改动）
+{_format_facts(facts)}
+
+【赛事中文名】
+术语表：
+{terms}
+写成「中文名-年份」的格式，例如「PGL布加勒斯特大师赛-2026」。
+
+【标题】
+近期发过的标题（学习格式和语气）：
+{titles}
+要求：
+1. 给出 4 个候选，按推荐程度排序，第一个最好。
+2. 格式「受访选手赛后采访：核心观点」，选手名必须和稿件里的写法完全一致。
+3. 核心观点从采访里提炼最有信息量、最有话题性的一句，用选手的第一人称口吻，像引语一样自然，一般 15～30 个字；4 个候选尽量选不同的观点。
+4. 不要加引号、书名号、序号，不要编造稿件里没有的内容。
+
+【摘要】
+范例：
+{summaries}
+要求：
+1. 一句话，照范例的格式：赛事中文名 + 今日继续 / 今日正式落下帷幕 +（比赛刚结束时加「就在刚刚，」）+ 胜者以X-Y的比分击败败者 + 这场比赛的结果（晋级、淘汰、名次，按赛段判断；拿不准就不写）+ ；比赛结束后，受访选手接受了主持人的采访。
+2. 决赛、季军赛写「今日正式落下帷幕」，其他比赛写「今日继续」。
+3. {host_line}
+4. 队名、选手名保留英文，和比赛事实、稿件的写法一致。
+
+【输出】只输出一个 JSON 对象：
+{{"interviewee": "受访选手（稿件里的写法）", "interviewee_team": "受访选手所在战队", "host": "主持人或 null", "event_zh": "赛事中文名", "titles": ["…", "…", "…", "…"], "summary": "…"}}
+
+【中文稿】
+{draft}
+"""

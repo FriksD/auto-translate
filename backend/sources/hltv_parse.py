@@ -367,6 +367,43 @@ def parse_team(html: str) -> Dict[str, Any]:
         "recent_results": recent,
         "map_stats": _parse_map_stats(stats_box) if stats_box else [],
         "news": news,
+        "photos": _gallery_section(soup, "Team photos of"),
+    }
+
+
+# ── 图库（选手页 Pictures of X、战队页 Team photos of X） ─────────────────────
+
+def _largest_image(img: Tag) -> str:
+    """<img> 里最大的那张：srcset 的最后一项（2x），没有就用 src。picture 里的 avif 版本不要。"""
+    srcset = (img.get("srcset") or "").strip()
+    if srcset:
+        return srcset.split(",")[-1].strip().split(" ")[0]
+    return img.get("src") or ""
+
+
+def _gallery_section(soup: BeautifulSoup, headline: str) -> List[Dict[str, Any]]:
+    """标题以 headline 开头的那一栏里的图库照片，按页面顺序（新的在前）。"""
+    for head in soup.select(".standard-headline"):
+        if not _text(head).startswith(headline):
+            continue
+        section = head.find_parent(class_="profile-section") or head.parent
+        pictures = []
+        for link in section.select('a[href^="/gallery/view/"]'):
+            img = link.select_one("img")
+            url = _largest_image(img) if img else ""
+            if url:
+                pictures.append({"id": _path_id(link["href"], "view"), "url": url,
+                                 "page": HLTV + link["href"]})
+        return pictures
+    return []
+
+
+def parse_player(html: str) -> Dict[str, Any]:
+    soup = _soup(html)
+    bodyshot = soup.select_one("img.player-summary-stat-box-left-bodyshot, img.bodyshot-img")
+    return {
+        "bodyshot": bodyshot.get("src", "") if bodyshot else "",
+        "pictures": _gallery_section(soup, "Pictures of"),
     }
 
 

@@ -24,7 +24,7 @@ from . import config, db, llm, review, web_auth
 from .integrations import feishu, schedule_card, task_cards
 from .integrations.feishu_ws import FeishuEventClient
 from .integrations.task_cards import cards
-from .pipeline import live, match_sources, stages
+from .pipeline import live, match_sources, package, stages
 from .pipeline.watcher import MatchWatcher
 from .runner import STAGES, STAGE_KEYS, PipelineRunner, State
 from .sources import bo3, hltv_parse
@@ -58,6 +58,7 @@ async def lifespan(_: FastAPI):
     _configure_browser(db.get_settings())
     stages.browser.on_challenge = _on_hltv_challenge
     stages.register(runner)
+    stages.on_delivered = package.service.start
     runner.on_failure(_notify_failure)
     runner.start()
 

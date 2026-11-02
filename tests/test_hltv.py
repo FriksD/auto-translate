@@ -73,6 +73,19 @@ class ParseTeamTest(unittest.TestCase):
         self.assertEqual(team["recent_results"][0]["opponent"], "Natus Vincere")
         self.assertTrue(team["news"][0]["title"].startswith("Vitality march into"))
 
+    def test_team_photos(self):
+        photos = P.parse_team(fixture("team_vitality"))["photos"]
+        self.assertEqual([p["id"] for p in photos], [281972, 281971])
+        self.assertIn("w=1000", photos[0]["url"])  # 取 srcset 里最大的一张，不要 avif
+        self.assertNotIn("fm=avif", photos[0]["url"])
+
+    def test_player_page(self):
+        player = P.parse_player(fixture("player_brollan"))
+        self.assertTrue(player["bodyshot"].startswith("https://img-cdn.hltv.org/playerbodyshot/"))
+        self.assertEqual(len(player["pictures"]), 3)
+        self.assertEqual(player["pictures"][0]["page"], "https://www.hltv.org/gallery/view/282270")
+        self.assertIn("w=800", player["pictures"][0]["url"])
+
     def test_search(self):
         self.assertEqual(P.parse_search_team(fixture("search_falcons"))["id"], 11283)
 

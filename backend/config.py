@@ -88,6 +88,23 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         # 采访结束后多久还没出初稿就提醒（分钟）
         "draft_deadline_minutes": 15,
     },
+    # 投稿信息（推荐标题、摘要、封面）：初稿发出后在后台生成
+    "package": {
+        # 标题范例：最近发过的标题，新的在前；在线精校定稿时选用的标题会自动加到最前面
+        "title_examples": [
+            "xertioN赛后采访：即便Vitality不是主力阵容，我们依然想击败他们",
+            "molodoy赛后采访：眼睛的手术对我帮助很大，我可以不用再分心去关注这件事了",
+        ],
+        # 摘要范例：同上
+        "summary_examples": [
+            "PGL布加勒斯特大师赛-2026今日正式落下帷幕，MOUZ以2-0的比分击败Vitality，以季军的名次结束了他们本次赛事的征程；"
+            "比赛结束后，xertioN接受了BanKs的采访。",
+            "PGL布加勒斯特大师赛-2026今日继续，就在刚刚，FURIA以2-1的比分击败MOUZ，成功晋级决赛；"
+            "比赛结束后，molodoy接受了BanKs的采访。",
+        ],
+        # 采访主持人，一行一个：「赛事关键词=主持人」按赛事名匹配（不区分大小写），只写名字的帮助 LLM 从转写里认人
+        "hosts": ["PGL=BanKs"],
+    },
     "feishu": {
         "enabled": False,
         "app_id": "",

@@ -4,6 +4,7 @@
 - 分段文件名带开始时刻（chunks/c_YYYYmmdd_HHMMSS.wav），断流重连后时间轴仍然连续可算。
 - 拉最低画质（144p/160p）：同时按 frame_interval 秒存一帧画面（frames/f_YYYYmmdd_HHMMSS.jpg），
   用来按镜头判断采访起止。不要画面时（frame_interval=0）Twitch 只拉 audio_only。
+- 采访期间另外用 grab_still() 拉最高画质截几张图（stills/），做投稿封面的候选。
 - 拉流进程退出（断流、主播下播又开播）时自动重连；连续失败多次会回调通知，但不会放弃，直到被停止。
 - 录到的音频明显比实际经过的时间多，说明拉到的是回放而不是直播（下载比实时快），
   立刻停掉这个直播源，回调 on_not_live 换一个。
@@ -32,6 +33,8 @@ STABLE_SECONDS = 60
 LIVE_CHECK_AFTER = 45
 LIVE_SURPLUS_SECONDS = 40
 LIVE_CHECK_INTERVAL = 5
+# 采访期间另外截的高清画面（封面候选）：一次截图最多等多久
+STILL_TIMEOUT = 60
 
 
 def recorded_since(chunk_dir: Path, since: float) -> float:
@@ -87,6 +90,32 @@ def build_commands(url: str, output_pattern: Path, ffmpeg: str, proxy: Optional[
         ffmpeg_cmd += ["-map", "0:v:0", "-an", "-vf", f"fps=1/{frame_interval},scale={FRAME_WIDTH}:-2",
                        "-q:v", "5", "-f", "image2", "-strftime", "1", str(frame_dir / FRAME_PATTERN)]
     return [streamlink, ffmpeg_cmd]
+
+
+def grab_still(url: str, output: Path, ffmpeg: str, proxy: Optional[str], timeout: float = STILL_TIMEOUT) -> None:
+    """从直播流截一张最高画质的画面（录音拉的是最低画质，截出来的图不能当封面）。失败时抛出异常。"""
+    streamlink = [sys.executable, "-m", "streamlink", "--stdout", "--loglevel", "error", "--twitch-disable-ads"]
+    if proxy:
+        streamlink += ["--http-proxy", proxy]
+    streamlink += [url, "best"]
+    partial = output.with_name(output.stem + ".part.jpg")
+    ffmpeg_cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-frames:v", "1",
+                  "-q:v", "2", str(partial)]
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    source = subprocess.Popen(streamlink, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=creationflags)
+    encoder = subprocess.Popen(ffmpeg_cmd, stdin=source.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                               creationflags=creationflags)
+    source.stdout.close()
+    try:
+        _, error = encoder.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        encoder.kill()
+        raise RuntimeError(f"{timeout:.0f} 秒内没有截到画面")
+    finally:
+        source.kill()
+    if encoder.returncode != 0 or not partial.exists() or partial.stat().st_size == 0:
+        raise RuntimeError(f"截图失败：{(error or b'').decode('utf-8', 'replace').strip()[-200:]}")
+    partial.replace(output)
 
 
 class Recorder:

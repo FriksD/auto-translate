@@ -6,6 +6,8 @@
 - 英文清洗稿只作参考；按转写的时间戳给每段配上音频位置，点一下从这段开始听。
 - 画面用直播录制时每隔几秒存的那些帧，跟着音频进度切换，用来分辨谁在说话。
 - 任何一个人都可以定稿：重新生成 Word，标记完成，发到任务卡片的话题里。
+- 投稿信息（推荐标题、摘要、封面候选，见 pipeline/package.py）也在这页上改选、复制；定稿时选用的
+  标题和摘要发到话题里，并加进设置里的范例。
 
 精校记录存在任务目录的 review.json：
   draft_mtime   上次由精校页写入 draft_zh.txt 的时间；文件被别处改过就重置下面的对应关系
@@ -32,7 +34,7 @@ from pydantic import BaseModel
 from . import config, db, web_auth
 from .integrations import task_cards
 from .integrations.task_cards import cards
-from .pipeline import live, stages
+from .pipeline import live, package, stages
 from .pipeline.recorder import frame_time
 from .runner import State
 
@@ -252,6 +254,21 @@ def payload(task_id: int) -> Dict[str, Any]:
         "suspects": report.get("suspects") or [],
         "unknown": report.get("unknown") or [],
         "finalized": review.get("finalized"),
+        "package": package_payload(task_id),
+    }
+
+
+def package_payload(task_id: int) -> Dict[str, Any]:
+    """投稿信息：标题、摘要、封面候选。还没生成过时 status 为 none。"""
+    data = package.load(task_id)
+    status = "running" if package.service.running(task_id) else data.get("status") or "none"
+    return {
+        "status": status,
+        "titles": data.get("titles") or [],
+        "title": package.chosen_title(data),
+        "summary": data.get("summary") or "",
+        "covers": [{**c, "url": f"/api/review/{task_id}/covers/{c['file']}"} for c in data.get("covers") or []],
+        "warnings": data.get("warnings") or [],
     }
 
 
@@ -302,11 +319,18 @@ def finalize(task_id: int, user: Dict[str, Any]) -> Dict[str, Any]:
         _save(task_id, paragraphs, review)
     db.update_task(task_id, state=State.DONE, error=None)
     db.add_event(task_id, f"{user['name']} 在线精校后定稿")
+    info = package.load(task_id)
+    title, summary = package.chosen_title(info), info.get("summary") or ""
+    package.remember_examples(title, summary)
     sent = False
     if db.get_settings()["feishu"].get("enabled"):
         try:
-            cards.alert(task_id, "定稿", f"{user['name']} 已定稿，Word 见下方")
+            extra = "，标题和摘要在 Word 后面" if title or summary else ""
+            cards.alert(task_id, "定稿", f"{user['name']} 已定稿，Word 见下方{extra}")
             cards.send_file(task_id, stages.find_docx(task_id))
+            for text in (title, summary):
+                if text:
+                    cards.send_text(task_id, text)
             sent = True
         except Exception as error:
             db.add_event(task_id, f"定稿的 Word 发送到飞书失败：{error}", level="warning")
@@ -362,6 +386,36 @@ async def put_paragraph(task_id: int, index: int, body: ParagraphEdit, user: Dic
 @router.post("/api/review/{task_id}/finalize")
 async def post_finalize(task_id: int, user: Dict[str, Any] = Depends(current_user)):
     return await run_in_threadpool(finalize, task_id, user)
+
+
+class PackageEdit(BaseModel):
+    title: Optional[str] = None
+    summary: Optional[str] = None
+
+
+@router.put("/api/review/{task_id}/package")
+async def put_package(task_id: int, body: PackageEdit, _: Dict[str, Any] = Depends(current_user)):
+    if db.get_task(task_id) is None:
+        raise HTTPException(404, "任务不存在")
+    await run_in_threadpool(package.update, task_id, body.title, body.summary)
+    return package_payload(task_id)
+
+
+@router.post("/api/review/{task_id}/package/regenerate")
+async def regenerate_package(task_id: int, user: Dict[str, Any] = Depends(current_user)):
+    if not (config.task_dir(task_id) / DRAFT).exists():
+        raise HTTPException(409, "还没有中文初稿")
+    if package.service.start(task_id, notify=False):
+        db.add_event(task_id, f"{user['name']} 重新生成投稿信息")
+    return package_payload(task_id)
+
+
+@router.get("/api/review/{task_id}/covers/{name}")
+async def get_cover(task_id: int, name: str, _: Dict[str, Any] = Depends(current_user)):
+    path = config.task_dir(task_id) / "covers" / name
+    if not package.COVER_NAME.match(name) or not path.is_file():
+        raise HTTPException(404, "图片不存在")
+    return FileResponse(path, headers={"Cache-Control": "max-age=60"})
 
 
 @router.get("/api/review/{task_id}/audio")

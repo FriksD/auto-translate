@@ -11,6 +11,7 @@
 - 遇到验证页先等它自动通过；超过 AUTO_WAIT 秒仍未通过，调用 on_challenge 回调
   （发飞书通知）请人在弹出的 Chrome 窗口里手动完成验证，最多再等 MANUAL_WAIT 秒。
 - 空闲超过 IDLE_CLOSE 秒自动关闭浏览器，下次访问时重新打开（有监视中的比赛时不关闭）。
+- 图片（封面候选）用 download_sync() 在临时标签页里打开图片地址下载。
 - 监视比赛时为每场比赛单独开一个标签页并一直保持打开（watch()）：比赛页的实时比分板
   通过 websocket 自己更新，读取 DOM 不产生请求；只在需要时（换图、比赛结束等）才刷新。
 """
@@ -83,6 +84,10 @@ class BrowserFetcher:
 
     def fetch_sync(self, url: str) -> str:
         return self._executor.submit(self._fetch_sync, url).result()
+
+    def download_sync(self, url: str) -> bytes:
+        """下载 HLTV 的图片：img-cdn 同样在 Cloudflare 后面（直接请求是 403），在浏览器标签页里打开取响应内容。"""
+        return self._executor.submit(self._download_sync, url).result()
 
     async def watch(self, key: str, url: str, reload: bool = False) -> Tuple[str, float]:
         """读取监视标签页的当前内容；标签页不存在或 reload=True 时（重新）加载。返回 (html, 上次加载时间)。"""
@@ -180,6 +185,28 @@ class BrowserFetcher:
             self._close()
             raise
         finally:
+            self._last_used = time.time()
+            self._schedule_idle_close()
+
+    def _download_sync(self, url: str) -> bytes:
+        self._cancel_idle_timer()
+        page = None
+        try:
+            self._ensure_page()
+            page = self._context.new_page()
+            self._throttle()
+            logger.info("HLTV 浏览器下载: %s", url)
+            response = page.goto(url, wait_until="load")
+            content_type = (response.headers.get("content-type") or "") if response else ""
+            if response is None or response.status != 200 or not content_type.startswith("image/"):
+                raise RuntimeError(f"没有拿到图片（{response.status if response else '无响应'} {content_type}）")
+            return response.body()
+        finally:
+            if page is not None:
+                try:
+                    page.close()
+                except Exception:
+                    pass
             self._last_used = time.time()
             self._schedule_idle_close()
 

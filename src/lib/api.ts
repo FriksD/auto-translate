@@ -252,6 +252,11 @@ export interface Settings {
     padding_seconds: number
     draft_deadline_minutes: number
   }
+  package: {
+    title_examples: string[]
+    summary_examples: string[]
+    hosts: string[]
+  }
   feishu: {
     enabled: boolean
     app_id: string
