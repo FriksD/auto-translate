@@ -332,10 +332,11 @@ def parse_team(html: str) -> Dict[str, Any]:
     for row in soup.select(".players-table tbody tr"):
         nick = _text(row.select_one(".playersBox-playernick .text-ellipsis, .playersBox-playernick"))
         status = _text(row.select_one(".player-status"))
+        link = row.select_one('a[href^="/player/"]')
         if nick:
-            roster.append({"name": nick, "status": status})
+            roster.append({"name": nick, "status": status, "id": _path_id(link["href"], "player") if link else None})
     if not roster:
-        roster = [{"name": _text(a), "status": ""} for a in soup.select(".bodyshot-team .text-ellipsis.bold")]
+        roster = [{"name": _text(a), "status": "", "id": None} for a in soup.select(".bodyshot-team .text-ellipsis.bold")]
 
     stats_box = soup.find(id="statsBox")
     recent = []

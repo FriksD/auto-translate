@@ -45,9 +45,13 @@ ENDING_TOLERANCE = 45
 ENDING_MARGIN = 60
 # 一直收不到比赛结束信号时，录制最长多久
 MAX_RECORDING_HOURS = 6
-# 采访期间截高清画面（封面候选，存在 stills/）：间隔、最多几张、连续失败几次就不再截
+# 判定的采访起点比比赛结束早这么多秒以上，就不是赛后采访。比分数据源常比直播画面晚 1～3 分钟
+# （实测 Legacy vs The MongolZ 采访开始 2 分多钟后才收到比赛结束），一张图至少半小时，留 10 分钟
+EARLY_START = 600
+# 采访期间截高清画面（封面候选，存在 stills/）：间隔、最多留几张（超过就删最早的）、连续失败几次就不再截。
+# 不能截满就停：实测 Legacy vs The MongolZ，比赛中途几次误判的"采访镜头"就把名额用完了，真正的采访一张没截到
 STILL_INTERVAL = 25
-MAX_STILLS = 10
+MAX_STILLS = 40
 STILL_MAX_FAILURES = 3
 # 镜头识别出的采访画面在多少秒以内，算"现在是采访镜头"
 STILL_SHOT_RECENT = 60
@@ -535,8 +539,6 @@ class LiveSession:
         if time.time() - self._still_last < STILL_INTERVAL or not self.recorder.running:
             return
         still_dir = self.workdir / "stills"
-        if still_dir.exists() and len(list(still_dir.glob("f_*.jpg"))) >= MAX_STILLS:
-            return
         state = load_state(self.task_id)
         if state.get("stream_down_since") or db.get_task(self.task_id)["state"] not in LIVE_STATES:
             return
@@ -548,6 +550,8 @@ class LiveSession:
             return
         self._still_last = time.time()
         still_dir.mkdir(exist_ok=True)
+        for old in sorted(still_dir.glob("f_*.jpg"))[:-(MAX_STILLS - 1)]:
+            old.unlink()
         output = still_dir / time.strftime(FRAME_PATTERN)
         settings = db.get_settings()
 
@@ -648,6 +652,11 @@ class LiveSession:
         if answer.get("started") and start is None:
             # "录音开始时采访已经在进行"：沿用之前判定的起点，没有就取窗口开头
             start = detection.get("start") if detection.get("started") else window[0]["start"]
+        # 赛后采访不会在比赛结束很久之前开始：那是图间的专访、选手上台聊天
+        over_offset = over_at - origin if over_at else None
+        if answer.get("started") and start is not None and over_offset is not None and start < over_offset - EARLY_START:
+            answer = {**answer, "started": False,
+                      "note": f"起点在比赛结束（{prompts.format_timestamp(over_offset)}）之前很久，不是赛后采访：{answer.get('note') or ''}"}
         end = prompts.parse_clock(answer.get("end"))
         if end is not None:
             end = line_end_at(lines, end)
@@ -672,6 +681,15 @@ class LiveSession:
         if run and (run["open"] or (ended and run["end"] > end + SHOT_END_AFTER)):
             ended = confirmed = False
         by_camera = bool(run and not run["open"] and not confirmed)
+        # 比分数据源还没报比赛结束时不截取（截取会停止录音）：实测 Aurora vs Liquid，图间主持人和 Liquid 成员在
+        # 台上聊天被判成采访开始，10 分钟后超时截取就会停掉录音、错过真正的赛后采访。
+        # 结束信号最多晚一次检查（录制中每分钟一次），等它来了再按已经判定好的结束点截取
+        hold = over_at is None and (by_camera or confirmed)
+        if hold:
+            if by_camera:
+                end = run["end"]
+            by_camera = confirmed = False
+            ended = True
 
         def update(s: Dict[str, Any]) -> None:
             d = s.setdefault("detection", {})
@@ -699,6 +717,8 @@ class LiveSession:
             self.manager.capture(self.task_id, min(start, run["start"]), run["end"], "auto")
         elif confirmed:
             self.manager.capture(self.task_id, start, end, "auto")
+        elif hold:
+            db.add_event(self.task_id, f"判断采访在 {prompts.format_timestamp(end)} 结束，比分数据源还没报比赛结束，等确认后截取")
         elif ended:
             db.add_event(self.task_id, f"初步判断采访在 {prompts.format_timestamp(end)} 结束，等下一次判断确认")
 
@@ -711,7 +731,8 @@ class LiveSession:
         detection = state.get("detection") or {}
         now = time.time()
         if detection.get("started"):
-            if now - detection.get("started_at", now) > int(cfg["max_interview_minutes"]) * 60:
+            # 从比赛结束算起：比赛结束前判定的"开始"可能是图间的专访，不能超时截取（见 _detect 的 hold）
+            if state.get("match_over_at") and now - max(detection.get("started_at", now), state["match_over_at"]) >                     int(cfg["max_interview_minutes"]) * 60:
                 lines = read_transcript(self.task_id)
                 end = lines[-1]["end"] if lines else detection["start"] + 60
                 db.add_event(self.task_id, "采访开始后长时间未判定结束，直接截取到当前位置", level="warning")

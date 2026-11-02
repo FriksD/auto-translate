@@ -67,6 +67,7 @@ class ParseTeamTest(unittest.TestCase):
         self.assertEqual(team["coach"], {"nick": "XTQZZZ", "real_name": "Rémy Quoniam", "full": "Rémy 'XTQZZZ' Quoniam"})
         self.assertEqual((team["hltv_rank"], team["vrs_rank"]), (2, 1))
         self.assertEqual([p["name"] for p in team["roster"]], ["apEX", "ZywOo", "flameZ", "mezii", "ropz"])
+        self.assertEqual(team["roster"][1]["id"], 11893)
         dust2 = team["map_stats"][0]
         self.assertEqual((dust2["map"], dust2["win_pct"], dust2["wins"], dust2["losses"], dust2["pick_pct"]),
                          ("Dust2", "82.4%", 14, 3, 51))

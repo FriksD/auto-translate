@@ -74,6 +74,11 @@ def reconcile_scoreboard(match: Dict[str, Any]) -> Dict[str, Any]:
 def live_map_score(match: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """当前地图的比分（按 team1/team2）。实时比分板优先，地图栏里的比分不会实时刷新。"""
     board = match.get("scoreboard")
+    current = next((m for m in match["maps"] if m.get("status") == "live"), None)
+    # 换图间隙比分板还停在上一张图的终局比分：实测 Aurora vs Liquid，Anubis 已开打，比分板还是 Inferno 3:13，
+    # 被当成决胜图 13 分立刻开录
+    if board and current and _map_key(board["map"]) != _map_key(current["name"]):
+        board = None
     if board:
         names = {(match["team1"].get("name") or "").lower(): "team1",
                  (match["team2"].get("name") or "").lower(): "team2"}

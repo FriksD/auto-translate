@@ -333,24 +333,24 @@ def _image_suffix(data: bytes) -> str:
 
 
 def _find_player(task: Dict[str, Any], name: str) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
-    """受访选手的 HLTV ID 和所在战队（背景信息里的战队条目）。背景信息里没有 ID（旧任务）时从比赛页找。"""
+    """
+    受访选手的 HLTV ID 和所在战队（背景信息里的战队条目）。背景信息里没有 ID（旧任务）时从两队的战队页阵容里找：
+    比赛刚结束时 HLTV 比赛页没有阵容栏（实测 IEM Beijing 2026 Legacy vs The MongolZ）。
+    """
     from . import stages
 
-    teams = (task.get("context") or {}).get("teams") or []
+    teams = [t for t in (task.get("context") or {}).get("teams") or [] if t.get("name")]
     lowered = name.lower()
     for team in teams:
         for player in team.get("player_details") or []:
-            if (player.get("name") or "").lower() == lowered:
-                if player.get("id"):
-                    return int(player["id"]), team
-                break
-    if not task.get("match_hltv_id"):
-        return None, None
-    match = hltv_parse.parse_match(stages.browser.fetch_sync(f"{hltv_parse.HLTV}/matches/{task['match_hltv_id']}/match"))
-    for side in ("team1", "team2"):
-        for player in match[side].get("players") or []:
-            if player["name"].lower() == lowered:
-                team = next((t for t in teams if t.get("name") == match[side]["name"]), {"id": match[side]["id"]})
+            if (player.get("name") or "").lower() == lowered and player.get("id"):
+                return int(player["id"]), team
+    for team in teams:
+        if not team.get("id"):
+            continue
+        page = hltv_parse.parse_team(stages.browser.fetch_sync(f"{hltv_parse.HLTV}/team/{team['id']}/team"))
+        for player in page["roster"]:
+            if player["name"].lower() == lowered and player.get("id"):
                 return player["id"], team
     return None, None
 

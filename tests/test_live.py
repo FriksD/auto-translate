@@ -406,7 +406,8 @@ class DetectRetractTest(unittest.TestCase):
             lines = [{"start": t, "end": t + 30, "text": "talk"} for t in range(0, 840, 30)]
             (workdir / "live_transcript.jsonl").write_text(
                 "".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
-            (workdir / "live.json").write_text(json.dumps({"recording": {"started_at": 1000.0}}), encoding="utf-8")
+            (workdir / "live.json").write_text(json.dumps({"recording": {"started_at": 1000.0}, "match_over_at": 1600.0}),
+                                               encoding="utf-8")
             fake_db = unittest.mock.MagicMock()
             fake_db.get_task.return_value = {"id": 1, "state": "recording", "title": "t", "context": {}}
             fake_db.get_settings.return_value = {**DEFAULT_SETTINGS, "live": {**CFG, "detect_interval": 0},
@@ -510,7 +511,8 @@ class ShotTimelineTest(unittest.TestCase):
 
 
 class CameraDetectTest(unittest.TestCase):
-    def run_detect(self, shots_spec, answers, transcript_until=1200):
+    def run_detect(self, shots_spec, answers, transcript_until=1200, over_at=1600.0):
+        """over_at：比赛结束的时刻（录制从 1000 开始，默认录制第 600 秒结束），None = 还没报结束。"""
         from backend import config
         from backend.pipeline import stages
         with tempfile.TemporaryDirectory() as tmp:
@@ -519,7 +521,8 @@ class CameraDetectTest(unittest.TestCase):
             (workdir / "live_transcript.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines), encoding="utf-8")
             (workdir / "shots.jsonl").write_text("".join(json.dumps(x) + "\n" for x in shots_from(shots_spec)),
                                                  encoding="utf-8")
-            (workdir / "live.json").write_text(json.dumps({"recording": {"started_at": 1000.0}}), encoding="utf-8")
+            (workdir / "live.json").write_text(json.dumps({"recording": {"started_at": 1000.0}, "match_over_at": over_at}),
+                                               encoding="utf-8")
             fake_db = unittest.mock.MagicMock()
             fake_db.get_task.return_value = {"id": 1, "state": "interview_detecting", "title": "t", "context": {}}
             fake_db.get_settings.return_value = {**DEFAULT_SETTINGS, "live": {**CFG, "detect_interval": 0},
@@ -545,6 +548,20 @@ class CameraDetectTest(unittest.TestCase):
         spec = [(t, "interview") for t in range(700, 1200, 5)]
         answer = {"started": True, "start": "11:30", "ended": True, "end": "13:30"}
         capture = self.run_detect(spec, [answer, answer])
+        capture.assert_not_called()
+
+    def test_no_capture_before_match_over(self):
+        # 实测 Aurora vs Liquid：图间台上聊天被判成采访，比赛没结束不能截取（会停掉录音）
+        spec = [(t, "desk") for t in range(600, 700, 5)] + [(t, "interview") for t in range(700, 925, 5)]
+        spec += [(t, "desk") for t in range(925, 1000, 5)]
+        capture = self.run_detect(spec, [{"started": True, "start": "11:30", "ended": False}], over_at=None)
+        capture.assert_not_called()
+
+    def test_start_long_before_match_over_is_not_the_interview(self):
+        spec = [(t, "desk") for t in range(600, 700, 5)] + [(t, "interview") for t in range(700, 925, 5)]
+        spec += [(t, "desk") for t in range(925, 1000, 5)]
+        # 比赛在录制第 1500 秒结束，判定的起点 690 早了 13 分多钟
+        capture = self.run_detect(spec, [{"started": True, "start": "11:30", "ended": False}], over_at=2500.0)
         capture.assert_not_called()
 
     def test_other_teams_interview_is_ignored(self):
