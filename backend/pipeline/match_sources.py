@@ -35,6 +35,42 @@ class AllSourcesFailed(RuntimeError):
 
 # ── HLTV 专用的纯函数 ────────────────────────────────────────────────────────
 
+def _map_key(name: Any) -> str:
+    """地图名比较用：de_dust2 / Dust2 / Dust 2 → dust2"""
+    text = str(name or "").lower()
+    text = text[3:] if text.startswith("de_") else text
+    return "".join(ch for ch in text if ch.isalnum())
+
+
+def board_final(board: Dict[str, Any]) -> bool:
+    """比分板上的比分是不是一张图打完的比分（13:11 以内，或加时 16、19…… 领先 2 分以上）。"""
+    high = max(board["ct"]["score"], board["t"]["score"])
+    low = min(board["ct"]["score"], board["t"]["score"])
+    return (high == 13 and low <= 11) or (high >= 16 and (high - 13) % 3 == 0 and high - low >= 2)
+
+
+def reconcile_scoreboard(match: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    HLTV 地图栏偶尔把正在打的图标成已经打完：实测 IEM Beijing 2026 Legacy vs The MongolZ，Mirage 半场 8:4 时
+    地图栏就标成 Legacy 胜，系列赛被当成 1:0、提前一整张图开录。比分板还在这张图上、比分也不是打完的比分时，以比分板为准。
+    """
+    board = match.get("scoreboard")
+    if not board or board_final(board):
+        return match
+    maps = [dict(m) for m in match["maps"]]
+    hit = next((m for m in maps if m.get("status") == "finished" and _map_key(m["name"]) == _map_key(board["map"])), None)
+    if hit is None:
+        return match
+    hit.update(status="live", winner=None, team1_score=None, team2_score=None)
+    seen = False
+    for m in maps:
+        if m.get("status") == "live":
+            if seen:
+                m["status"] = "upcoming"
+            seen = True
+    return {**match, "maps": maps}
+
+
 def live_map_score(match: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """当前地图的比分（按 team1/team2）。实时比分板优先，地图栏里的比分不会实时刷新。"""
     board = match.get("scoreboard")
@@ -90,6 +126,7 @@ class HLTVSource:
         match = await self.client.watch_match(match_id)
         if needs_reload(match, time.time()):
             match = await self.client.watch_match(match_id, reload=True)
+        match = reconcile_scoreboard(match)
         return {**match, "live": live_map_score(match), "has_round_score": True, "source": self.name}
 
     async def release(self, task: Dict[str, Any]) -> None:

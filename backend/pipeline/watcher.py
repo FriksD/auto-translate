@@ -21,7 +21,7 @@ from .. import config, db
 from ..runner import PipelineRunner, State
 from ..sources.hltv import HLTVClient
 from .live import LiveManager, candidate_streams, load_state, mutate_state, patch_state, pick_stream
-from .match_sources import SOURCE_LABELS, AllSourcesFailed, SourceChain, brief, live_map_score
+from .match_sources import SOURCE_LABELS, AllSourcesFailed, SourceChain, _map_key, brief, live_map_score
 
 logger = logging.getLogger(__name__)
 
@@ -111,13 +111,6 @@ def series_continued(record_wins: Optional[List[int]], assessment: Dict[str, Any
     """自动开录后有图打完了、系列赛却没结束（开录时的"决胜图"被另一方拿下）。人工开录的没有 record_wins，不管。"""
     return (record_wins is not None and assessment["status"] == "live"
             and sum(assessment["map_wins"]) > sum(record_wins))
-
-
-def _map_key(name: Any) -> str:
-    """地图名比较用：de_dust2 / Dust2 / Dust 2 → dust2"""
-    text = str(name or "").lower()
-    text = text[3:] if text.startswith("de_") else text
-    return "".join(ch for ch in text if ch.isalnum())
 
 
 def describe(match: Dict[str, Any], assessment: Dict[str, Any]) -> str:

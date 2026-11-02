@@ -216,6 +216,23 @@ class Bo3Test(unittest.TestCase):
         with_score["live"] = {**with_score["live"], "team2": CFG["record_at"]}
         self.assertTrue(watcher.assess(with_score, CFG)["should_record"])
 
+    def test_scoreboard_overrides_map_wrongly_marked_finished(self):
+        # 实测：Mirage 加时 14:13，地图栏却按半场比分标成 team1 胜（8:4）
+        board = {"round": 28, "map": "Mirage", "ct": {"team": "Legacy", "score": 14}, "t": {"team": "The MongolZ", "score": 13}}
+        match = {"scoreboard": board, "maps": [
+            {"name": "Mirage", "team1_score": 8, "team2_score": 4, "status": "finished", "winner": 1},
+            {"name": "Dust2", "team1_score": None, "team2_score": None, "status": "live", "winner": None},
+            {"name": "Ancient", "team1_score": None, "team2_score": None, "status": "upcoming", "winner": None},
+        ]}
+        fixed = match_sources.reconcile_scoreboard(match)
+        self.assertEqual([(m["name"], m["status"], m["winner"]) for m in fixed["maps"]],
+                         [("Mirage", "live", None), ("Dust2", "upcoming", None), ("Ancient", "upcoming", None)])
+        # 比分板停在刚打完的那张图上（换图前）：地图栏是对的，不改
+        board.update(ct={"team": "Legacy", "score": 13}, t={"team": "The MongolZ", "score": 9})
+        self.assertIs(match_sources.reconcile_scoreboard(match), match)
+        board.update(ct={"team": "Legacy", "score": 19}, t={"team": "The MongolZ", "score": 17})
+        self.assertIs(match_sources.reconcile_scoreboard(match), match)
+
     def test_map_key(self):
         self.assertEqual(watcher._map_key("de_dust2"), watcher._map_key("Dust 2"))
         self.assertNotEqual(watcher._map_key("Inferno"), watcher._map_key("Nuke"))
