@@ -190,6 +190,20 @@ class NameNormalizer:
             report.unknown.add(token)
 
 
+_CJK = "㐀-䶿一-鿿"
+_CJK_PUNCT = "、。！，：；？「」『』“”（）"
+_SPACE_AFTER_CJK = re.compile(rf"(?<=[{_CJK}{_CJK_PUNCT}])[ 	]+(?=[A-Za-z0-9])")
+_SPACE_BEFORE_CJK = re.compile(rf"(?<=[A-Za-z0-9])[ 	]+(?=[{_CJK}])")
+_SPACE_AROUND_PUNCT = re.compile(rf"[ 	]+(?=[{_CJK_PUNCT}])")
+
+
+def tighten_cjk_spacing(text: str) -> str:
+    """去掉中文和英文 / 数字之间的空格（"配合默契 m0NESY 和" → "配合默契m0NESY和"），英文单词之间的空格不动。"""
+    text = _SPACE_AFTER_CJK.sub("", text)
+    text = _SPACE_BEFORE_CJK.sub("", text)
+    return _SPACE_AROUND_PUNCT.sub("", text)
+
+
 def replace_tokens(text: str, mapping: Dict[str, str]) -> Tuple[str, Dict[str, int]]:
     """把整词出现的 token 替换为目标写法，返回新文本和每个 token 的替换次数。"""
     counts: Dict[str, int] = {}

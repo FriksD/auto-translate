@@ -33,7 +33,7 @@ from ..sources.hltv import HLTVClient
 from . import context as context_builder
 from . import prompts
 from .docx_export import export_docx
-from .names import NameNormalizer, collect_canonical_names, replace_tokens, token_contexts
+from .names import NameNormalizer, collect_canonical_names, replace_tokens, tighten_cjk_spacing, token_contexts
 
 logger = logging.getLogger(__name__)
 
@@ -386,7 +386,7 @@ def normalize_draft(task_id: int, use_llm: bool = True) -> Dict[str, Any]:
     report_dict = report.to_dict()
     if use_llm and (report_dict["suspects"] or report_dict["unknown"]):
         text = resolve_names_with_llm(task_id, db.get_settings(), text, report_dict, sorted(normalizer.canonical))
-    write_text(task_id, "draft_zh.txt", text)
+    write_text(task_id, "draft_zh.txt", tighten_cjk_spacing(text))
     write_text(task_id, "names_report.json", json.dumps(report_dict, ensure_ascii=False, indent=1))
     return report_dict
 

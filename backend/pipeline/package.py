@@ -32,6 +32,7 @@ from ..integrations import feishu
 from ..integrations.task_cards import cards, review_url
 from ..sources import hltv_parse
 from . import prompts
+from .names import tighten_cjk_spacing
 
 logger = logging.getLogger(__name__)
 
@@ -155,13 +156,13 @@ def host_for(event: str, lines: List[str]) -> Tuple[Optional[str], List[str]]:
 
 def _clean_title(text: Any) -> str:
     text = re.sub(r"^\s*(\d+[.、)]|[-*•])\s*", "", str(text or ""))
-    return " ".join(text.strip().strip("\"'“”「」《》").split())
+    return tighten_cjk_spacing(" ".join(text.strip().strip("\"'“”「」《》").split()))
 
 
 def apply_answer(answer: Dict[str, Any], facts: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     """整理 LLM 的回答，检查摘要里的比分和队名。返回（字段, 警告）。"""
     titles = [t for t in (_clean_title(t) for t in answer.get("titles") or []) if t]
-    summary = " ".join(str(answer.get("summary") or "").split())
+    summary = tighten_cjk_spacing(" ".join(str(answer.get("summary") or "").split()))
     warnings = []
     if not titles:
         warnings.append("LLM 没有给出标题")

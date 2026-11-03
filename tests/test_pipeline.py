@@ -96,7 +96,7 @@ class PipelineTest(unittest.TestCase):
             done = self._wait(client, task["id"])
             self.assertEqual(done["state"], "review", done["error"])
             self.assertIn("m0NESY", whisper.initial_prompt)
-            self.assertEqual(done["texts"]["draft_zh.txt"], "Q：今天是什么给了你们信心？\n\nA：m0NESY 今天打得非常好。")
+            self.assertEqual(done["texts"]["draft_zh.txt"], "Q：今天是什么给了你们信心？\n\nA：m0NESY今天打得非常好。")
             self.assertTrue(done["docx"].endswith("_Falcons_vs_Vitality.docx"))
             self.assertTrue((config.task_dir(task["id"]) / done["docx"]).exists())
 

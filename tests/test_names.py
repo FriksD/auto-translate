@@ -99,3 +99,16 @@ class CollectCanonicalNamesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CjkSpacingTest(unittest.TestCase):
+    def test_spaces_between_chinese_and_latin_are_removed(self):
+        from backend.pipeline.names import tighten_cjk_spacing
+        self.assertEqual(tighten_cjk_spacing("比赛中 kyousuke 和 m0NESY 配合默契"), "比赛中kyousuke和m0NESY配合默契")
+        self.assertEqual(tighten_cjk_spacing("拿下了 13 分，对手是 Natus Vincere 。"), "拿下了13分，对手是Natus Vincere。")
+        self.assertEqual(tighten_cjk_spacing("Q：你们赢了 Falcons ，感觉如何？"), "Q：你们赢了Falcons，感觉如何？")
+
+    def test_spaces_between_english_words_and_line_breaks_are_kept(self):
+        from backend.pipeline.names import tighten_cjk_spacing
+        text = "Q：Natus Vincere 对 Falcons 的比赛NL2A：map 1 打得很好".replace("NL2", "\n\n")
+        self.assertEqual(tighten_cjk_spacing(text), "Q：Natus Vincere对Falcons的比赛NL2A：map 1打得很好".replace("NL2", "\n\n"))
