@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 TICK = 10
 RETRY_AFTER_ERROR = 60
+DECIDING_SLOW_CAP = 180
+DECIDING_FAST_CAP = 120
 SOURCE_DOWN_ALERT = 5 * 60
 SOURCE_DOWN_RECORD = 10 * 60
 # 已开始录音但还没收到"比赛结束"的任务（比如采访已截取、正在处理），继续跟踪比分到这么久
@@ -91,6 +93,12 @@ def assess(match: Dict[str, Any], cfg: Dict[str, Any], recording: bool = False,
         interval, reason = intervals["mid"], f"决胜图赛点方 {leader} 分"
     else:
         interval, reason = intervals["idle"], f"决胜图赛点方 {leader} 分"
+
+    # 决胜图期间（赛点方随时可能拿下）检查要密：比分读不到或还没到 mid_at 时最多隔 3 分钟，之后最多隔 2 分钟，
+    # 免得 10 分钟一次的空闲间隔正好跳过 10 分开录点，甚至跳过整张图的收尾
+    if status == "live" and deciding and not recording:
+        cap = DECIDING_SLOW_CAP if leader is None or leader < int(cfg["mid_at"]) else DECIDING_FAST_CAP
+        interval = min(interval, cap)
 
     should_record = (status == "over" or no_score_record
                      or bool(deciding and leader is not None and (leader >= int(cfg["record_at"]) or overtime)))
@@ -270,7 +278,8 @@ class MatchWatcher:
                                      cfg: Dict[str, Any]) -> Dict[str, Any]:
         """主数据源没有回合比分、决胜图正在打：从 HLTV 比分板补回合比分。读不到就原样返回。"""
         current = next((m for m in match["maps"] if m.get("status") == "live"), None)
-        if current is None or "hltv" not in self.sources.order(cfg) or not task.get("match_hltv_id"):
+        if (current is None or match.get("source") == "hltv"  # 主数据源就是 HLTV，再读一遍没有新信息
+                or "hltv" not in self.sources.order(cfg) or not task.get("match_hltv_id")):
             return match
         try:
             hltv = await self.sources.sources["hltv"].read(task)

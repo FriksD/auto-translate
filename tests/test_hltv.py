@@ -61,6 +61,25 @@ class ParseMatchTest(unittest.TestCase):
         self.assertEqual(match["format"], "Best of 5 (LAN) * Grand final")
 
 
+class MapWidgetTest(unittest.TestCase):
+    def test_map_widgets_with_percent_are_not_maps(self):
+        # 实测 Aurora vs G2：页面里带胜率的小组件（"Dust2 - 66%"）也用 .mapholder，排在真实地图前面，
+        # 被当成「正在打的图」，真正的当前图成了未开始，读不到回合比分
+        import copy
+        from bs4 import BeautifulSoup
+        expected = P.parse_match(fixture("match_live"))["maps"]
+        soup = BeautifulSoup(fixture("match_live"), "html.parser")
+        first = soup.select_one(".mapholder")
+        for label in ("Dust2 - 66%", "Anubis - 68%", "Mirage - 64%"):
+            widget = copy.copy(first)
+            widget.select_one(".mapname").string = label
+            first.insert_before(widget)
+        match = P.parse_match(str(soup))
+        self.assertEqual(match["maps"], expected)
+        self.assertEqual(sum(1 for m in match["maps"] if m["status"] == "live"), 1)
+        self.assertFalse(any("%" in m["name"] for m in match["maps"]))
+
+
 class ParseTeamTest(unittest.TestCase):
     def test_team_page(self):
         team = P.parse_team(fixture("team_vitality"))

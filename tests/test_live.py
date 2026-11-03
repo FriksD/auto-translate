@@ -1,4 +1,5 @@
 """比赛监视（决胜图判断、轮询间隔、数据源）、直播源选择、录音时间轴与采访截取的测试。"""
+import asyncio
 import json
 import sys
 import tempfile
@@ -94,12 +95,14 @@ class AssessTest(unittest.TestCase):
         self.assertEqual(result["interval"], CFG["intervals"]["idle"])
 
     def test_intervals_follow_leader_score_on_deciding_map(self):
-        cases = [((5, 3), "idle", False), ((8, 6), "mid", False), ((10, 4), "mid", True),
-                 ((11, 9), "late", True), ((12, 12), "late", True)]
+        # 决胜图期间检查间隔有上限：没到 mid_at 最多 3 分钟，之后最多 2 分钟（空闲 10 分钟会跳过开录点）
+        cases = [((5, 3), watcher.DECIDING_SLOW_CAP, False), ((8, 6), watcher.DECIDING_FAST_CAP, False),
+                 ((10, 4), watcher.DECIDING_FAST_CAP, True), ((11, 9), CFG["intervals"]["late"], True),
+                 ((12, 12), CFG["intervals"]["late"], True)]
         for score, interval, record in cases:
             result = watcher.assess(make_match(finished=(1,), live_score=score), CFG)
             self.assertTrue(result["deciding"])
-            self.assertEqual(result["interval"], CFG["intervals"][interval], score)
+            self.assertEqual(result["interval"], interval, score)
             self.assertEqual(result["should_record"], record, score)
         self.assertTrue(watcher.assess(make_match(finished=(1,), live_score=(12, 12)), CFG)["overtime"])
 
@@ -116,7 +119,7 @@ class AssessTest(unittest.TestCase):
         trailing = watcher.assess(make_match(finished=(1,), live_score=(4, 11)), CFG)
         self.assertTrue(trailing["deciding"])
         self.assertFalse(trailing["should_record"])
-        self.assertEqual(trailing["interval"], CFG["intervals"]["idle"])
+        self.assertEqual(trailing["interval"], watcher.DECIDING_SLOW_CAP)
         self.assertTrue(watcher.assess(make_match(finished=(1,), live_score=(11, 4)), CFG)["should_record"])
         self.assertTrue(watcher.assess(make_match(finished=(1,), live_score=(4, 12)), CFG)["should_record"] is False)
         self.assertTrue(watcher.assess(make_match(finished=(1,), live_score=(12, 12)), CFG)["should_record"])  # 加时
@@ -193,7 +196,7 @@ class Bo3Test(unittest.TestCase):
         early = watcher.assess(match, CFG, now=now)
         self.assertTrue(early["deciding"])
         self.assertFalse(early["should_record"])
-        self.assertEqual(early["interval"], CFG["intervals"]["mid"])
+        self.assertEqual(early["interval"], watcher.DECIDING_SLOW_CAP)
         current["began_at"] = now - wait + 60
         self.assertEqual(watcher.assess(match, CFG, now=now)["interval"], 65)  # 到点前一分钟：到点再查
         current["began_at"] = now - wait
@@ -212,9 +215,37 @@ class Bo3Test(unittest.TestCase):
                       "live": {"map": name, "round": 8, "team1": 3, "team2": 4, "source": "scoreboard"}}
         result = watcher.assess(with_score, CFG, now=1_800_000_000)
         self.assertFalse(result["should_record"])
-        self.assertEqual(result["interval"], CFG["intervals"]["idle"])
+        self.assertEqual(result["interval"], watcher.DECIDING_SLOW_CAP)
         with_score["live"] = {**with_score["live"], "team2": CFG["record_at"]}
         self.assertTrue(watcher.assess(with_score, CFG)["should_record"])
+
+    def test_deciding_map_never_waits_idle_interval(self):
+        # 实测：决胜图读不到回合比分时按 10 分钟空闲间隔检查，整张图都没检查到
+        unknown = watcher.assess(make_match(finished=(1,)), CFG)
+        self.assertFalse(unknown["live"] is not None)
+        self.assertLessEqual(unknown["interval"], watcher.DECIDING_SLOW_CAP)
+        recording = watcher.assess(make_match(finished=(1,), live_score=(3, 4)), CFG, recording=True)
+        self.assertEqual(recording["interval"], CFG["intervals"]["recording"])
+
+    def test_hltv_without_round_score_falls_back_to_timed_recording(self):
+        # 实测 Aurora vs G2：HLTV 来源永远标 has_round_score=True，读不到比分时「开打 N 分钟后录」的兜底不生效
+        match = make_match(finished=(1,))
+        match["maps"].append({"name": "Mirage", "team1_score": None, "team2_score": None,
+                              "status": "live", "winner": None})
+
+        class Client:
+            async def watch_match(self, match_id, reload=False):
+                return match
+
+        source = match_sources.HLTVSource(Client())
+        read = asyncio.run(source.read({"match_hltv_id": "1"}))
+        self.assertFalse(read["has_round_score"])
+        now = 1_800_000_000
+        wait = CFG["no_score_record_minutes"] * 60
+        read["maps"][-1]["began_at"] = now - wait
+        self.assertTrue(watcher.assess(read, CFG, now=now)["should_record"])
+        read["maps"][-1]["began_at"] = now - 60
+        self.assertFalse(watcher.assess(read, CFG, now=now)["should_record"])
 
     def test_scoreboard_overrides_map_wrongly_marked_finished(self):
         # 实测：Mirage 加时 14:13，地图栏却按半场比分标成 team1 胜（8:4）

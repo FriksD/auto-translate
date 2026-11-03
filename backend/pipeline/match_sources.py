@@ -132,7 +132,9 @@ class HLTVSource:
         if needs_reload(match, time.time()):
             match = await self.client.watch_match(match_id, reload=True)
         match = reconcile_scoreboard(match)
-        return {**match, "live": live_map_score(match), "has_round_score": True, "source": self.name}
+        live = live_map_score(match)
+        # 决胜图正在打却读不到回合比分（比分板没出来、地图栏不实时刷新）：按没有回合比分处理，走开打后定时录制的兜底
+        return {**match, "live": live, "has_round_score": live is not None, "source": self.name}
 
     async def release(self, task: Dict[str, Any]) -> None:
         if task.get("match_hltv_id"):

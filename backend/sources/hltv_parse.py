@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from bs4 import BeautifulSoup, Tag
 
 HLTV = "https://www.hltv.org"
+MAP_WIDGET_NAME = re.compile(r"\s-\s*\d+%\s*$")
 FULL_NAME = re.compile(r"^(?P<first>.*?)\s*'(?P<nick>[^']+)'\s*(?P<last>.*)$")
 
 
@@ -182,6 +183,10 @@ def parse_match(html: str) -> Dict[str, Any]:
     for holder in soup.select(".mapholder"):
         name = _text(holder.select_one(".mapname"))
         if not name or name == "TBA":
+            continue
+        # 页面里还有带胜率的地图小组件（"Dust2 - 66%"），也用了 .mapholder：不是这场比赛的地图，
+        # 混进来会让真正的当前图被挤成「未开始」，读不到回合比分
+        if MAP_WIDGET_NAME.search(name):
             continue
         scores = [_int(_text(s)) for s in holder.select(".results-team-score")]
         picked = holder.select_one(".results-left.pick, .results-right.pick")
