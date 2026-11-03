@@ -79,6 +79,10 @@ def live_map_score(match: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # 被当成决胜图 13 分立刻开录
     if board and current and _map_key(board["map"]) != _map_key(current["name"]):
         board = None
+    # 图间空档：上一张图刚打完、下一张还没被标成正在打（地图栏没有 live 的图），比分板还停在上一张图的终局比分。
+    # 实测 FaZe vs Falcons 1:1 暂停录制后，Anubis 13:10 被当成决胜图赛点方 13 分，一分钟后又开录了
+    if board and current is None and board_final(board):
+        board = None
     if board:
         names = {(match["team1"].get("name") or "").lower(): "team1",
                  (match["team2"].get("name") or "").lower(): "team2"}

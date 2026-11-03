@@ -219,6 +219,26 @@ class Bo3Test(unittest.TestCase):
         with_score["live"] = {**with_score["live"], "team2": CFG["record_at"]}
         self.assertTrue(watcher.assess(with_score, CFG)["should_record"])
 
+    def test_stale_final_board_between_maps_does_not_start_recording(self):
+        # 实测 FaZe vs Falcons：Anubis 13:10 打完成了 1:1，决胜图还没被标成 live，比分板停在 13:10，
+        # 被当成决胜图赛点方 13 分，暂停录制一分钟后又自动开录
+        match = make_match(finished=(1, 2))
+        match["maps"][-1]["name"] = "Anubis"
+        match["maps"].append({"name": "Mirage", "team1_score": None, "team2_score": None,
+                              "status": "upcoming", "winner": None})
+        match["scoreboard"] = {"round": 24, "map": "Anubis",
+                               "ct": {"team": "MIBR", "score": 10}, "t": {"team": "fnatic", "score": 13}}
+        self.assertIsNone(match_sources.live_map_score(match))
+        result = watcher.assess({**match, "live": match_sources.live_map_score(match)}, CFG)
+        self.assertTrue(result["deciding"])
+        self.assertFalse(result["should_record"])
+        self.assertLessEqual(result["interval"], watcher.DECIDING_SLOW_CAP)
+        # 决胜图一旦被标成正在打、比分板换到新图，照常按新比分判断
+        match["maps"][-1]["status"] = "live"
+        match["scoreboard"] = {"round": 12, "map": "Mirage",
+                               "ct": {"team": "MIBR", "score": 10}, "t": {"team": "fnatic", "score": 4}}
+        self.assertTrue(watcher.assess({**match, "live": match_sources.live_map_score(match)}, CFG)["should_record"])
+
     def test_deciding_map_never_waits_idle_interval(self):
         # 实测：决胜图读不到回合比分时按 10 分钟空闲间隔检查，整张图都没检查到
         unknown = watcher.assess(make_match(finished=(1,)), CFG)
