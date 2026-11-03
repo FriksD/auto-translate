@@ -313,8 +313,9 @@ def finalize(task_id: int, user: Dict[str, Any]) -> Dict[str, Any]:
     if task["state"] in BUSY_STATES:
         raise HTTPException(409, "任务正在处理中")
     with _locks[task_id]:
-        stages.stage_export(task_id)
+        stages.stage_export(task_id, with_lead=True)
         paragraphs, review = _load(task_id)
+        first_time = not review.get("finalized")
         review["finalized"] = {"by": user["name"], "at": time.time()}
         _save(task_id, paragraphs, review)
     db.update_task(task_id, state=State.DONE, error=None)
@@ -325,12 +326,13 @@ def finalize(task_id: int, user: Dict[str, Any]) -> Dict[str, Any]:
     sent = False
     if db.get_settings()["feishu"].get("enabled"):
         try:
-            extra = "，标题和摘要在 Word 后面" if title or summary else ""
+            extra = "，导语在正文最前面，标题在 Word 后面" if title or summary else ""
             cards.alert(task_id, "定稿", f"{user['name']} 已定稿，Word 见下方{extra}")
             cards.send_file(task_id, stages.find_docx(task_id))
-            for text in (title, summary):
-                if text:
-                    cards.send_text(task_id, text)
+            if title:
+                cards.send_text(task_id, title)
+            if first_time:  # 重新定稿不再重发封面
+                package.send_covers(task_id, info)
             sent = True
         except Exception as error:
             db.add_event(task_id, f"定稿的 Word 发送到飞书失败：{error}", level="warning")
@@ -405,7 +407,7 @@ async def put_package(task_id: int, body: PackageEdit, _: Dict[str, Any] = Depen
 async def regenerate_package(task_id: int, user: Dict[str, Any] = Depends(current_user)):
     if not (config.task_dir(task_id) / DRAFT).exists():
         raise HTTPException(409, "还没有中文初稿")
-    if package.service.start(task_id, notify=False):
+    if package.service.start(task_id):
         db.add_event(task_id, f"{user['name']} 重新生成投稿信息")
     return package_payload(task_id)
 

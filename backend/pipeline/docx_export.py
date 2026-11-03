@@ -5,10 +5,11 @@
 - 主持人提问段落以「Q：」开头，整段加粗
 - 选手回答段落以「A：」开头，不加粗
 - 全文小四（12pt），字体保持 Word 默认，其余任何地方都不加粗
+- 有导语（投稿摘要）时放在正文最前面，单独一段，不加粗
 """
 import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from docx import Document
 from docx.oxml.ns import qn
@@ -35,7 +36,7 @@ def parse_paragraphs(text: str) -> List[Tuple[str, str]]:
     return paragraphs
 
 
-def export_docx(text: str, path: Path) -> Path:
+def export_docx(text: str, path: Path, lead: Optional[str] = None) -> Path:
     document = Document()
     section = document.sections[0]  # 模板默认是 Letter，改成 A4 与国内 Word 默认页边距
     section.page_width, section.page_height = Cm(21), Cm(29.7)
@@ -52,6 +53,10 @@ def export_docx(text: str, path: Path) -> Path:
         r_pr.append(lang)
     lang.set(qn("w:eastAsia"), "zh-CN")
 
+    if lead and lead.strip():
+        run = document.add_paragraph().add_run(lead.strip())
+        run.font.size = FONT_SIZE
+        run.bold = False
     for kind, content in parse_paragraphs(text):
         run = document.add_paragraph().add_run(content)
         run.font.size = FONT_SIZE

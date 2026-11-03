@@ -142,16 +142,17 @@ class StoredTest(unittest.TestCase):
         self.assertEqual(result["titles"][0], "xertioN赛后采访：甲")
         self.assertTrue(any("截取采访画面失败" in w for w in result["warnings"]))
 
-        sent = []
-        settings = db.get_settings()
-        settings["feishu"]["enabled"] = True
-        db.save_settings(settings)
-        with unittest.mock.patch.object(package.cards, "alert", side_effect=lambda *a, **k: sent.append(("alert", a[1]))), \
-                unittest.mock.patch.object(package.cards, "send_text", side_effect=lambda _, t: sent.append(("text", t))):
-            package.send_to_feishu(task["id"], result)
-        self.assertEqual(sent[0], ("alert", "投稿信息"))
-        self.assertEqual(sent[1:], [("text", "xertioN赛后采访：甲"), ("text", "摘要"),
-                                    ("text", "其他候选标题：\n2. xertioN赛后采访：乙")])
+        # 初稿阶段不往飞书发标题、摘要、封面：生成完成后没有任何发送
+        self.assertEqual(result["summary"], "摘要（听译，可能存在出入）。")
+
+    def test_summary_note_added_once_before_final_period(self):
+        note = package.with_summary_note
+        self.assertEqual(note("甲击败乙；比赛结束后，max接受了采访，谈论了队伍的困境。"),
+                         "甲击败乙；比赛结束后，max接受了采访，谈论了队伍的困境（听译，可能存在出入）。")
+        self.assertEqual(note("甲击败乙，max接受了采访"), "甲击败乙，max接受了采访（听译，可能存在出入）。")
+        already = "甲击败乙，max接受了采访（听译，可能存在出入）。"
+        self.assertEqual(note(already), already)
+        self.assertEqual(note(""), "")
 
 
 if __name__ == "__main__":

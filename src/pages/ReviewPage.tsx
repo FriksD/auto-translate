@@ -127,7 +127,7 @@ export function ReviewPage() {
   }, [id, load])
 
   const finalize = async () => {
-    if (!window.confirm('定稿：用当前的中文稿重新生成 Word，标记完成并发到飞书群里？')) return
+    if (!window.confirm('定稿：用当前的中文稿重新生成 Word（摘要作为导语放在最前面），标记完成，并把 Word、标题和封面发到飞书群里？')) return
     setFinalizing(true)
     try {
       const result = await call<ReviewData>('POST', `/api/review/${id}/finalize`)

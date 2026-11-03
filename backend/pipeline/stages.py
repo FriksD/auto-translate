@@ -426,12 +426,24 @@ def find_docx(task_id: int) -> Optional[Path]:
     return files[0] if files else None
 
 
-def stage_export(task_id: int) -> None:
+def stage_export(task_id: int, with_lead: bool = False) -> None:
+    """生成 Word。with_lead：把投稿摘要作为导语放在正文最前面（定稿时；初稿发出时摘要还没生成）。
+    已经定稿的任务重新生成 Word 时也带导语。"""
     task = _task(task_id)
     workdir = config.task_dir(task_id)
+    lead = None
+    review_file = workdir / "review.json"
+    if review_file.exists():
+        try:
+            with_lead = with_lead or bool(json.loads(review_file.read_text(encoding="utf-8")).get("finalized"))
+        except ValueError:
+            pass
+    if with_lead:
+        from . import package
+        lead = package.load(task_id).get("summary") or None
     for old in workdir.glob("*.docx"):
         old.unlink()
-    export_docx(read_text(task_id, "draft_zh.txt"), workdir / docx_filename(task))
+    export_docx(read_text(task_id, "draft_zh.txt"), workdir / docx_filename(task), lead=lead)
 
 
 def _live_turnaround(task: Dict[str, Any]) -> Optional[str]:

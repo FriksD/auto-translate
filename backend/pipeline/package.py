@@ -1,8 +1,8 @@
 """
 投稿信息：推荐标题、摘要、封面候选。
 
-初稿发到飞书之后在后台生成（不耽误出初稿），完成后发到任务卡片的话题里：一条推荐标题、一条摘要
-（都是纯文本，长按整条复制）、其他候选标题、封面候选图。在线精校页上也能看、改、一键复制。
+初稿发到飞书之后在后台生成（不耽误出初稿），只存在任务目录里，在线精校页上看、改、一键复制；
+飞书里在定稿时才发：Word（摘要作为导语放在正文最前面）、选用的标题、封面候选图。
 
 - 标题和摘要：比赛事实（赛事、赛段、比分、胜负）由代码从背景信息和直播比分算好，LLM 只负责
   从中文稿里提炼观点、套用范例格式。标题范例来自设置，定稿时选用的标题自动加进去。
@@ -79,6 +79,17 @@ def update(task_id: int, title: Optional[str] = None, summary: Optional[str] = N
             package["summary"] = " ".join(summary.split())
         save(task_id, package)
     return package
+
+
+SUMMARY_NOTE = "（听译，可能存在出入）"
+
+
+def with_summary_note(summary: str) -> str:
+    """摘要末尾带上「听译」备注：句号前面，已经写了就不重复。"""
+    summary = summary.strip()
+    if not summary or "听译" in summary:
+        return summary
+    return summary.rstrip("。") + SUMMARY_NOTE + "。"
 
 
 def chosen_title(package: Dict[str, Any]) -> str:
@@ -162,7 +173,7 @@ def _clean_title(text: Any) -> str:
 def apply_answer(answer: Dict[str, Any], facts: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     """整理 LLM 的回答，检查摘要里的比分和队名。返回（字段, 警告）。"""
     titles = [t for t in (_clean_title(t) for t in answer.get("titles") or []) if t]
-    summary = tighten_cjk_spacing(" ".join(str(answer.get("summary") or "").split()))
+    summary = with_summary_note(tighten_cjk_spacing(" ".join(str(answer.get("summary") or "").split())))
     warnings = []
     if not titles:
         warnings.append("LLM 没有给出标题")
@@ -470,37 +481,8 @@ def generate(task_id: int) -> Dict[str, Any]:
     return package
 
 
-def send_to_feishu(task_id: int, package: Dict[str, Any]) -> None:
-    """推荐标题、摘要各一条纯文本（长按整条复制），再发其他候选标题和封面图。"""
-    settings = db.get_settings()
-    if not feishu.enabled(settings):
-        return
-    titles = package.get("titles") or []
-    parts = []
-    if titles:
-        parts.append("推荐标题")
-    if package.get("summary"):
-        parts.append("摘要")
-    if len(titles) > 1:
-        parts.append("其他候选标题")
-    if package.get("covers"):
-        parts.append("封面候选")
-    if not parts:
-        cards.alert(task_id, "投稿信息生成失败", "；".join(package.get("warnings") or []))
-        return
-    lines = [f"下面依次是{'、'.join(parts)}，标题和摘要可以长按整条复制"]
-    url = review_url(task_id, settings["feishu"])
-    if url:
-        lines.append(f"精校页上也能改和一键复制：{url}")
-    if package.get("warnings"):
-        lines.append("注意：" + "；".join(package["warnings"]))
-    cards.alert(task_id, "投稿信息", "\n".join(lines))
-    if titles:
-        cards.send_text(task_id, titles[0])
-    if package.get("summary"):
-        cards.send_text(task_id, package["summary"])
-    if len(titles) > 1:
-        cards.send_text(task_id, "其他候选标题：\n" + "\n".join(f"{i}. {t}" for i, t in enumerate(titles[1:], 2)))
+def send_covers(task_id: int, package: Dict[str, Any]) -> None:
+    """定稿时把封面候选图发到卡片的话题里（标题和 Word 由定稿流程发）。"""
     cover_dir = config.task_dir(task_id) / "covers"
     for cover in package.get("covers") or []:
         try:
@@ -519,23 +501,21 @@ class PackageService:
     def running(self, task_id: int) -> bool:
         return task_id in self._running
 
-    def start(self, task_id: int, notify: bool = True) -> bool:
+    def start(self, task_id: int) -> bool:
         with self._guard:
             if task_id in self._running:
                 return False
             self._running.add(task_id)
-        threading.Thread(target=self._run, args=(task_id, notify), name=f"package-{task_id}", daemon=True).start()
+        threading.Thread(target=self._run, args=(task_id,), name=f"package-{task_id}", daemon=True).start()
         return True
 
-    def _run(self, task_id: int, notify: bool) -> None:
+    def _run(self, task_id: int) -> None:
         try:
             package = generate(task_id)
             covers = len(package.get("covers") or [])
             db.add_event(task_id, f"投稿信息已生成：{len(package.get('titles') or [])} 个候选标题、{covers} 张封面候选"
                          + (f"（{'；'.join(package['warnings'])}）" if package.get("warnings") else ""),
                          level="warning" if package.get("warnings") else "info")
-            if notify:
-                send_to_feishu(task_id, package)
         except Exception as error:
             logger.exception("任务 %s 生成投稿信息失败", task_id)
             db.add_event(task_id, f"生成投稿信息失败：{error}", level="error")

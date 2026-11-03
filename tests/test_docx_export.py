@@ -36,6 +36,14 @@ class DocxExportTest(unittest.TestCase):
                 self.assertEqual(run.font.size.pt, 12)
         self.assertEqual((round(section.page_width.cm, 1), round(section.page_height.cm, 1)), (21.0, 29.7))
 
+    def test_lead_is_first_plain_paragraph(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = export_docx("Q：问\n\nA：答", Path(tmp) / "out.docx", lead="IEM北京站今日继续，TYLOO以2-0击败9z。")
+            paragraphs = Document(str(path)).paragraphs
+        self.assertEqual([p.text for p in paragraphs], ["IEM北京站今日继续，TYLOO以2-0击败9z。", "Q：问", "A：答"])
+        self.assertEqual([[r.bold for r in p.runs] for p in paragraphs], [[False], [True], [False]])
+        self.assertEqual(paragraphs[0].runs[0].font.size.pt, 12)
+
 
 if __name__ == "__main__":
     unittest.main()
