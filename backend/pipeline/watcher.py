@@ -200,6 +200,8 @@ class MatchWatcher:
             return False  # 演示任务（回放录好的直播）由回放脚本推进，不读比分
         if task["state"] in WATCH_STATES:
             return True
+        if (task.get("context") or {}).get("monitor"):
+            return False  # 直播间监视截下来的采访，不绑定比赛
         if task["state"] in (State.CANCELLED, State.DONE, State.NO_INTERVIEW):
             return False
         # 录制期间就截取了采访（比赛结束信号还没到）：继续跟踪到比赛结束，用来更新最终比分

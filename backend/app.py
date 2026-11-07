@@ -24,7 +24,7 @@ from . import config, db, llm, review, web_auth
 from .integrations import feishu, schedule_card, task_cards
 from .integrations.feishu_ws import FeishuEventClient
 from .integrations.task_cards import cards
-from .pipeline import live, match_sources, package, stages
+from .pipeline import live, match_sources, monitor, package, stages
 from .pipeline.watcher import MatchWatcher
 from .runner import STAGES, STAGE_KEYS, PipelineRunner, State
 from .sources import bo3, hltv_parse
@@ -74,6 +74,8 @@ async def lifespan(_: FastAPI):
 
     live.manager.bind(enqueue_threadsafe)
     await run_in_threadpool(live.manager.resume_all)
+    monitor.manager.bind(enqueue_threadsafe)
+    monitor.manager.start()
     watcher.start()
     global _main_loop
     _main_loop = loop
@@ -85,6 +87,7 @@ async def lifespan(_: FastAPI):
     await watcher.stop()
     await runner.stop()
     await run_in_threadpool(live.manager.stop_all)
+    await run_in_threadpool(monitor.manager.stop_all)
     await stages.browser.close()
 
 
@@ -522,6 +525,79 @@ async def live_audio(task_id: int, start: float, end: float):
 
 
 # ── HLTV 比赛 ─────────────────────────────────────────────────────────────────
+
+# ── 直播间监视 ────────────────────────────────────────────────────────────────
+
+class MonitorStream(BaseModel):
+    url: str
+    label: Optional[str] = ""
+    proxy: Optional[bool] = None  # 不填按域名判断：国内平台直连
+    language: Optional[str] = None  # 转写语言，"" 为自动识别；不填按平台默认
+
+
+class MonitorBody(BaseModel):
+    title: Optional[str] = None
+    event_id: Optional[str] = None
+    event_name: Optional[str] = None
+    streams: Optional[List[MonitorStream]] = None
+    enabled: Optional[bool] = None
+
+
+def _require_monitor(monitor_id: int) -> Dict[str, Any]:
+    found = db.get_monitor(monitor_id)
+    if found is None:
+        raise HTTPException(404, "直播间监视不存在")
+    return found
+
+
+def _monitor_fields(body: MonitorBody) -> Dict[str, Any]:
+    fields = body.model_dump(exclude_unset=True)
+    if "streams" in fields:
+        try:
+            fields["streams"] = monitor.normalize_streams(fields["streams"] or [])
+        except ValueError as error:
+            raise HTTPException(400, str(error))
+    return fields
+
+
+@app.get("/api/monitors")
+async def list_monitors():
+    return [monitor.manager.status(m) for m in db.list_monitors()]
+
+
+@app.post("/api/monitors")
+async def create_monitor(body: MonitorBody):
+    fields = _monitor_fields(body)
+    if not fields.get("streams"):
+        raise HTTPException(400, "请至少填写一条直播链接")
+    fields["title"] = (fields.get("title") or fields.get("event_name") or "").strip() or "直播间"
+    created = db.create_monitor(**fields)
+    monitor.manager.wake()
+    return monitor.manager.status(created)
+
+
+@app.get("/api/monitors/{monitor_id}")
+async def get_monitor(monitor_id: int, tail: int = 200):
+    return monitor.manager.status(_require_monitor(monitor_id), transcript_tail=tail)
+
+
+@app.put("/api/monitors/{monitor_id}")
+async def update_monitor(monitor_id: int, body: MonitorBody):
+    _require_monitor(monitor_id)
+    fields = _monitor_fields(body)
+    updated = db.update_monitor(monitor_id, **fields) if fields else db.get_monitor(monitor_id)
+    monitor.manager.wake()
+    return monitor.manager.status(updated)
+
+
+@app.delete("/api/monitors/{monitor_id}")
+async def delete_monitor(monitor_id: int):
+    _require_monitor(monitor_id)
+    db.update_monitor(monitor_id, enabled=False, windows=[])
+    await run_in_threadpool(monitor.manager.reconcile)
+    db.delete_monitor(monitor_id)
+    return {"ok": True}
+
 
 @app.get("/api/matches")
 async def list_matches(refresh: bool = False, days: int = 5):

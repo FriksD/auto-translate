@@ -62,6 +62,28 @@ CREATE TABLE IF NOT EXISTS feishu_cards (
     reserved_by TEXT             -- 在飞书里预约的人（open_id）
 );
 
+-- 直播间监视：一个赛事一个，最多两条直播链接
+CREATE TABLE IF NOT EXISTS monitors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    event_id TEXT,
+    event_name TEXT,
+    streams_json TEXT NOT NULL DEFAULT '[]',   -- [{url, label, proxy}]
+    enabled INTEGER NOT NULL DEFAULT 0,        -- 手动开着
+    windows_json TEXT NOT NULL DEFAULT '[]',   -- 预约产生的自动监视时间窗 [{start, end, match_id}]
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS monitor_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    monitor_id INTEGER NOT NULL,
+    ts REAL NOT NULL,
+    level TEXT NOT NULL,
+    message TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_events_monitor ON monitor_events(monitor_id);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value_json TEXT NOT NULL
@@ -249,6 +271,93 @@ def invalidate_cards() -> None:
     with _lock:
         _db().execute("UPDATE feishu_cards SET rendered_at = NULL")
         _db().commit()
+
+
+# ── 直播间监视 ────────────────────────────────────────────────────────────────
+
+MONITOR_UPDATABLE = {"title", "event_id", "event_name", "streams", "enabled", "windows"}
+
+
+def _monitor_row(row: sqlite3.Row) -> Dict[str, Any]:
+    monitor = dict(row)
+    monitor["streams"] = json.loads(monitor.pop("streams_json") or "[]")
+    monitor["windows"] = json.loads(monitor.pop("windows_json") or "[]")
+    monitor["enabled"] = bool(monitor["enabled"])
+    return monitor
+
+
+def _monitor_columns(fields: Dict[str, Any]) -> Dict[str, Any]:
+    columns = {}
+    for key, value in fields.items():
+        if key not in MONITOR_UPDATABLE:
+            raise ValueError(f"不能修改的字段：{key}")
+        if key in ("streams", "windows"):
+            columns[f"{key}_json"] = json.dumps(value or [], ensure_ascii=False)
+        elif key == "enabled":
+            columns[key] = int(bool(value))
+        else:
+            columns[key] = value
+    return columns
+
+
+def create_monitor(**fields: Any) -> Dict[str, Any]:
+    now = time.time()
+    columns = {"created_at": now, "updated_at": now, **_monitor_columns(fields)}
+    with _lock:
+        cur = _db().execute(
+            f"INSERT INTO monitors ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
+            list(columns.values()),
+        )
+        _db().commit()
+        monitor_id = cur.lastrowid
+    return get_monitor(monitor_id)
+
+
+def get_monitor(monitor_id: int) -> Optional[Dict[str, Any]]:
+    with _lock:
+        row = _db().execute("SELECT * FROM monitors WHERE id = ?", (monitor_id,)).fetchone()
+    return _monitor_row(row) if row else None
+
+
+def list_monitors() -> List[Dict[str, Any]]:
+    with _lock:
+        rows = _db().execute("SELECT * FROM monitors ORDER BY id DESC").fetchall()
+    return [_monitor_row(r) for r in rows]
+
+
+def update_monitor(monitor_id: int, **fields: Any) -> Dict[str, Any]:
+    columns = {**_monitor_columns(fields), "updated_at": time.time()}
+    with _lock:
+        _db().execute(
+            f"UPDATE monitors SET {', '.join(f'{k} = ?' for k in columns)} WHERE id = ?",
+            list(columns.values()) + [monitor_id],
+        )
+        _db().commit()
+    return get_monitor(monitor_id)
+
+
+def delete_monitor(monitor_id: int) -> None:
+    with _lock:
+        _db().execute("DELETE FROM monitor_events WHERE monitor_id = ?", (monitor_id,))
+        _db().execute("DELETE FROM monitors WHERE id = ?", (monitor_id,))
+        _db().commit()
+
+
+def add_monitor_event(monitor_id: int, message: str, level: str = "info") -> None:
+    with _lock:
+        _db().execute(
+            "INSERT INTO monitor_events (monitor_id, ts, level, message) VALUES (?, ?, ?, ?)",
+            (monitor_id, time.time(), level, message),
+        )
+        _db().commit()
+
+
+def recent_monitor_events(monitor_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+    with _lock:
+        rows = _db().execute(
+            "SELECT * FROM monitor_events WHERE monitor_id = ? ORDER BY id DESC LIMIT ?", (monitor_id, limit)
+        ).fetchall()
+    return [dict(r) for r in reversed(rows)]
 
 
 # ── 术语表 ────────────────────────────────────────────────────────────────────

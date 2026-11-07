@@ -287,6 +287,34 @@ Rules:
 - If no interview is visible yet, return started=false."""
 
 
+INTERVIEW_SCAN_SYSTEM = (
+    "You monitor the live broadcast of a CS2 esports event. You read a rolling, timestamped speech-to-text "
+    "transcript of the stream and find live player interviews. You answer with strict JSON only."
+)
+
+
+def build_interview_scan_prompt(lines: List[Dict[str, Any]], event: str, teams: str = "", shots: str = "") -> str:
+    """直播间监视用的采访定位：不绑定比赛，找出这段转写里的所有现场采访。"""
+    return f"""Event: {event or 'unknown'}
+{('Teams at this event (with players, may be incomplete):' + chr(10) + teams + chr(10)) if teams else ''}
+Timestamps are [mm:ss] (minutes may exceed 59) since the recording started. The transcript is machine-generated, so names may be misspelled.
+
+Transcript:
+{format_live_lines(lines)}
+{shots}
+A live interview is a host or interviewer asking a player or coach questions and the player answering, live on the broadcast (on stage, in front of a sponsor wall, on the desk as a guest). It can happen before a match, between maps, after a match, or be about anything. Casters' analysis, analysts' desk talk among themselves, replays, ads, highlight videos and pre-recorded or edited features are NOT live interviews.
+
+List every live interview in the transcript, in time order. Answer with JSON:
+{{"interviews": [{{"start": "mm:ss", "ended": bool, "end": "mm:ss" or null, "interviewees": [player names], "team": team name or null, "live": bool, "note": short reason}}]}}
+
+Rules:
+- "start" is the line where the interviewer starts (greeting or first question).
+- One interview per interviewee: when the interviewer finishes with one player and starts with another (e.g. "thanks, and now I'm joined by X"), that is a new interview starting at that line. Several players answering together in the same conversation are one interview with several interviewees.
+- Set "ended" true only if the transcript clearly continues with other content after the interview (casters, analysts, ads, the next segment, or the next interview). If the transcript ends while the interview may still be going, set "ended" false. "end" is the last line of the interview.
+- Set "live" false for pre-recorded or edited features and for clips played from earlier; they are still listed so they are not mistaken for live interviews.
+- If there is no interview, return {{"interviews": []}}."""
+
+
 SHOT_LABELS = ("interview", "desk", "game", "other")
 
 SHOT_SYSTEM = (

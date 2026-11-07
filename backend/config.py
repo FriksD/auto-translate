@@ -90,6 +90,22 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         # 采访结束后多久还没出初稿就提醒（分钟）
         "draft_deadline_minutes": 15,
     },
+    # 直播间监视：一直录、一直转写和识别画面，发现采访就截下来生成任务。
+    # 分段时长、抽帧间隔、判断间隔、采访最长时长、截取余量沿用上面 live 里的设置
+    "monitor": {
+        # 未开播时多久探测一次是否开播（秒）
+        "offline_poll_seconds": 60,
+        # 录制中多久确认一次还在播（秒；B 站查房间接口，其他平台断流时才探测）
+        "live_probe_seconds": 120,
+        # 录音、画面、转写保留多久（小时）：截下来的采访已经复制到任务目录，旧的录音可以删
+        "retain_hours": 6,
+        # 转写里出现这些话（不区分大小写）就让 LLM 看一下是不是采访；采访镜头也会触发
+        "trigger_phrases": [
+            "joined by", "joining me", "join me", "with me now", "i'm here with", "i am here with",
+            "congratulations", "congrats", "how does it feel", "how are you feeling", "how do you feel",
+            "thank you for your time", "thanks for your time", "thanks for joining", "thank you for joining",
+        ],
+    },
     # 投稿信息（推荐标题、摘要、封面）：初稿发出后在后台生成
     "package": {
         # 标题范例：最近发过的标题，新的在前；在线精校定稿时选用的标题会自动加到最前面
@@ -154,6 +170,12 @@ def use_data_dir(path: Path) -> None:
     DATA_DIR = Path(path)
     TASKS_DIR = DATA_DIR / "tasks"
     DB_PATH = DATA_DIR / "app.db"
+
+
+def monitor_dir(monitor_id: int, stream_key: str) -> Path:
+    path = DATA_DIR / "monitors" / str(monitor_id) / stream_key
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def task_dir(task_id: int) -> Path:
