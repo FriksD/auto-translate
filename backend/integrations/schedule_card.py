@@ -21,7 +21,7 @@ MAX_ROWS = 25
 
 HELP_TEXT = (
     "可以这样用（群里先 @我）：\n"
-    "· 赛程 —— 今天的比赛，卡片上可以切换日期、星级，点「预约」= 开赛前 15 分钟起自动监视这个赛事的直播间\n"
+    "· 赛程 —— 今天的比赛，卡片上可以切换日期、星级，点「预约」= 这个赛事的直播间按赛程自动监视（每个比赛日第一场前 2 小时到最后一场打完后 2 小时）\n"
     "· 赛程 明天 / 赛程 全部 / 赛程 2星\n"
     "· 预约 vitality —— 按队名或赛事名搜索未来几天的比赛（支持术语表里的别名，如 小蜜蜂）\n"
     "· 预约 <HLTV 比赛链接> —— 直接预约\n"
@@ -165,10 +165,10 @@ def _match_row(match: Dict[str, Any], view: Dict[str, Any], show_date: bool) -> 
     event = (match.get("event") or {}).get("name") or ""
     detail = " · ".join(p for p in (event, (match.get("format") or "").upper()) if p)
     left = {"tag": "markdown", "content": f"`{when}` **{_match_teams(match)}** {stars}\n<font color='grey'>{detail}</font>"}
-    if match.get("window"):
+    if match.get("monitor_id"):
         right = _button("取消预约", {"action": "unreserve", "match_id": match["id"], "view": view}, "danger")
         right["confirm"] = {"title": _text("取消预约？"), "text": _text(
-            f"删掉直播间「{match.get('monitor_title') or ''}」为 {_match_teams(match)} 加的监视时间段")}
+            f"直播间「{match.get('monitor_title') or ''}」不再按赛程监视这个赛事的所有比赛")}
         left["content"] += f" <font color='green'>已预约 · {match.get('monitor_title') or '直播间'}</font>"
     else:
         right = _button("预约", {"action": "reserve", "match_id": match["id"], "view": view}, "primary")

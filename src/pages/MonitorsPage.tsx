@@ -535,7 +535,7 @@ export function MonitorPage() {
           <p className="text-sm text-muted-foreground">
             {monitor.event_name || '未填写赛事名'}
             {monitor.windows.length > 0 &&
-              ` · 预约时段：${monitor.windows.map((w) => `${formatTime(w.start)}–${clock(w.end)}`).join('、')}`}
+              ` · ${monitor.follow_schedule ? '按赛程监视' : '预约时段'}：${monitor.windows.map((w) => `${formatTime(w.start)}–${clock(w.end)}`).join('、')}`}
           </p>
         </div>
         <div className="flex gap-2">

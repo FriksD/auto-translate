@@ -181,10 +181,13 @@ def _subtitle(status: Dict[str, Any], now: float) -> str:
     else:
         current = [w for w in status.get("windows") or [] if float(w["start"]) <= now <= float(w["end"])]
         upcoming = sorted(float(w["start"]) for w in status.get("windows") or [] if float(w["start"]) > now)
+        how = "按赛程" if status.get("follow_schedule") else "按预约"
         if current:
-            parts.append(f"按预约监视到 {_clock(max(float(w['end']) for w in current))}")
+            parts.append(f"{how}监视到 {_clock(max(float(w['end']) for w in current), with_date=True)}")
         elif upcoming:
-            parts.append(f"{_clock(upcoming[0], with_date=True)} 按预约开始监视")
+            parts.append(f"{_clock(upcoming[0], with_date=True)} {how}开始监视")
+        elif status.get("follow_schedule"):
+            parts.append("按赛程监视，暂时没有接下来的比赛")
     return " · ".join(p for p in parts if p) or f"直播间 #{status['id']}"
 
 
@@ -203,7 +206,7 @@ def build_monitor_card(status: Dict[str, Any], now: Optional[float] = None) -> D
             elements.append(_markdown("\n".join(lines)))
     elements.append(_stream_form(status))
     buttons = [
-        _monitor_button("停止监视", "monitor_off", status["id"], "danger", "停止录制这个直播间，预约的时间窗也一起清掉")
+        _monitor_button("停止监视", "monitor_off", status["id"], "danger", "停止录制这个直播间，也不再按赛程自动监视")
         if on else _monitor_button("开始监视", "monitor_on", status["id"], "primary"),
         _link_button("打开直播间页", f"{config.PUBLIC_URL}/monitors/{status['id']}"),
     ]

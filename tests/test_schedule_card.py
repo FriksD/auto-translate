@@ -21,7 +21,7 @@ def match(match_id, t1, t2, day, hour, stars=0, event="IEM Chengdu", window=None
     unix_ms = int((NOW + day * 86400 + (hour - 12) * 3600) * 1000)
     return {"id": match_id, "unix_ms": unix_ms, "live": live, "stars": stars, "format": "bo3",
             "team1": {"name": t1}, "team2": {"name": t2}, "event": {"name": event},
-            "window": window, "monitor_title": event if window else None}
+            "window": window, "monitor_id": 1 if window else None, "monitor_title": event if window else None}
 
 
 MATCHES = [
@@ -183,23 +183,23 @@ class CommandHandlingTest(unittest.TestCase):
         with hltv_list, fill, clock:
             message = asyncio.run(reserve(1))
             self.assertIn("已预约 Vitality vs MOUZ", message)
+            self.assertIn("按赛程自动监视整个赛事", message)
             self.assertIn("还没有直播链接", message)
             monitors = db.list_monitors()
             self.assertEqual([m["event_name"] for m in monitors], ["IEM Chengdu"])
-            window = monitors[0]["windows"][0]
-            self.assertEqual((window["match_id"], window["reserved_by"]), (1, "ou_me"))
-            self.assertEqual(window["start"], MATCHES[0]["unix_ms"] / 1000 - 15 * 60)
+            self.assertTrue(monitors[0]["follow_schedule"])
+            # 今天两场（14:00、19:00 的 BO3）连成一段：12:00 到 19:00 + 3 + 2 小时；明天 18:00 那场单独一段
+            self.assertEqual([(w["start"], w["end"], sorted(w["match_ids"])) for w in monitors[0]["windows"]],
+                             [(NOW, NOW + 12 * 3600, [1, 2]), (NOW + 28 * 3600, NOW + 35 * 3600, [3])])
             self.assertEqual(self.client.updates[0][0], "om_schedule")
-            # 同一赛事的另一场：加到同一个直播间
-            asyncio.run(reserve(2))
-            self.assertEqual(len(db.list_monitors()), 1)
-            self.assertEqual(len(db.list_monitors()[0]["windows"]), 2)
+            # 同一赛事的另一场：已经按赛程监视了
             with self.assertRaises(self.app.HTTPException):
-                asyncio.run(reserve(1))
+                asyncio.run(reserve(2))
             message = asyncio.run(self.app._card_action(
-                {"action": "unreserve", "match_id": 1, "view": {}}, {}, "ou_me", "om_schedule"))
+                {"action": "unreserve", "match_id": 2, "view": {}}, {}, "ou_me", "om_schedule"))
             self.assertIn("已取消预约", message)
-            self.assertEqual([w["match_id"] for w in db.list_monitors()[0]["windows"]], [2])
+            found = db.list_monitors()[0]
+            self.assertEqual((found["follow_schedule"], found["windows"]), (False, []))
         # 预约不生成任务
         self.assertEqual(db.list_tasks(), [])
 

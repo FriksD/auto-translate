@@ -93,6 +93,9 @@ class MonitorCardTest(unittest.TestCase):
         now = time.time()
         status = status_of(enabled=False, windows=[{"start": now + 3600, "end": now + 7200}])
         self.assertIn("按预约开始监视", monitor_cards.build_monitor_card(status, now)["header"]["subtitle"]["content"])
+        status = status_of(enabled=False, follow_schedule=True, windows=[])
+        self.assertIn("按赛程监视，暂时没有接下来的比赛",
+                      monitor_cards.build_monitor_card(status, now)["header"]["subtitle"]["content"])
 
 
 class InterviewTaskCardTest(unittest.TestCase):
@@ -195,23 +198,46 @@ class ServiceAndActionTest(unittest.TestCase):
 
 
 class ReservationTest(unittest.TestCase):
-    def test_window_and_lookup(self):
-        cfg = {"pre_match_minutes": 15, "window_hours": 5}
-        window = monitor.reservation_window(7, 10_000.0, "A vs B", cfg, now=5_000.0, reserved_by="ou_1")
-        self.assertEqual((window["start"], window["end"]), (10_000 - 900, 10_000 + 5 * 3600))
-        unknown = monitor.reservation_window(8, None, "C vs D", cfg, now=5_000.0)
-        self.assertEqual((unknown["start"], unknown["end"]), (5_000.0, 5_000 + 5 * 3600))
-        monitors = [{"id": 1, "title": "IEM 北京", "event_id": "8000", "event_name": "IEM Beijing 2026", "windows": [window]},
+    def test_schedule_windows(self):
+        cfg = {"pre_hours": 2, "post_hours": 2, "map_hours": 1}
+        h = 3600
+        day = [{"id": 1, "unix_ms": 10 * h * 1000, "format": "bo3"},   # 08:00 → 15:00
+               {"id": 2, "unix_ms": 14 * h * 1000, "format": "bo1"},   # 12:00 → 17:00
+               {"id": 3, "unix_ms": 19 * h * 1000, "format": "bo3"},   # 17:00 → 24:00
+               {"id": 4, "unix_ms": 34 * h * 1000, "format": "bo5"},   # 第二天 32:00 → 41:00
+               {"id": 5, "unix_ms": None, "format": "bo3"},            # 时间待定：跳过
+               {"id": 6, "unix_ms": None, "live": True, "format": ""}]  # 正在打：从现在算，赛制未知按 BO3
+        windows = monitor.schedule_windows(day, cfg, now=40 * h)
+        self.assertEqual([(w["start"] / h, w["end"] / h, w["match_ids"]) for w in windows],
+                         [(8, 24, [1, 2, 3]), (32, 45, [4, 6])])
+        self.assertEqual(monitor.match_hours("bo5", cfg), 5)
+        self.assertEqual(monitor.match_hours("", cfg), 3)
+        self.assertEqual(monitor.window_of({"windows": windows}, 2)["start"], 8 * h)
+        self.assertIsNone(monitor.window_of({"windows": windows}, 5))
+
+    def test_merge_keeps_started_windows(self):
+        h = 3600
+        old = [{"start": 8 * h, "end": 24 * h, "match_ids": [1, 2, 3]},   # 正在监视：保留
+               {"start": 30 * h, "end": 36 * h, "match_ids": [9]},         # 还没开始：以新赛程为准
+               {"start": 0, "end": 2 * h, "match_id": 7}]                  # 已经结束：丢掉
+        fresh = [{"start": 17 * h, "end": 25 * h, "match_ids": [3]}, {"start": 32 * h, "end": 41 * h, "match_ids": [4]}]
+        merged = monitor.merge_schedule(old, fresh, now=20 * h)
+        self.assertEqual([(w["start"] / h, w["end"] / h, w["match_ids"]) for w in merged],
+                         [(8, 25, [1, 2, 3]), (32, 41, [4])])
+
+    def test_event_lookup(self):
+        monitors = [{"id": 1, "title": "IEM 北京", "event_id": "8000", "event_name": "IEM Beijing 2026", "windows": []},
                     {"id": 2, "title": "BLAST", "event_id": None, "event_name": "BLAST Rivals Fall 2026", "windows": []}]
-        self.assertEqual(monitor.find_reservation(monitors, 7)[0]["id"], 1)
-        self.assertIsNone(monitor.find_reservation(monitors, 9))
         self.assertEqual(monitor.find_event_monitor(monitors, 8000, "whatever")["id"], 1)
         self.assertEqual(monitor.find_event_monitor(monitors, 1, "Intel Extreme Masters Beijing 2026")["id"], 1)
         self.assertEqual(monitor.find_event_monitor(monitors, None, "blast rivals fall 2026")["id"], 2)
         self.assertIsNone(monitor.find_event_monitor(monitors, None, "PGL Masters"))
-        self.assertEqual(monitor.drop_reservation([window, unknown], 7), [unknown])
+        matches = [{"id": 1, "event": {"id": 8000, "name": "IEM Beijing 2026"}},
+                   {"id": 2, "event": {"id": 9, "name": "PGL Masters"}}]
+        self.assertEqual([m["id"] for m in monitor.event_matches(matches, monitors[0])], [1])
+        window = {"start": 10_000.0, "end": 20_000.0, "match_ids": [1]}
         # 窗口内就算开着
-        self.assertTrue(monitor.is_on({"enabled": False, "windows": [window]}, 10_000.0))
+        self.assertTrue(monitor.is_on({"enabled": False, "windows": [window]}, 15_000.0))
         self.assertFalse(monitor.is_on({"enabled": False, "windows": [window]}, 1_000.0))
 
     def test_official_stream(self):
@@ -229,6 +255,7 @@ class MigrationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             config.use_data_dir(Path(tmp))
             db.init_db()
+            booked = db.create_monitor(title="IEM", windows=[{"start": 0, "end": 1, "match_id": 7}])
             old = db.create_task(title="old", state="recording", source_type="live")
             kept = db.create_task(title="kept", state=State.REVIEW, source_type="live")
             db._conn.close()
@@ -236,6 +263,7 @@ class MigrationTest(unittest.TestCase):
             self.assertEqual(db.get_task(old["id"])["state"], State.CANCELLED)
             self.assertEqual(db.get_task(kept["id"])["state"], State.REVIEW)
             self.assertIn("直播间监视", db.list_events(old["id"])[-1]["message"])
+            self.assertTrue(db.get_monitor(booked["id"])["follow_schedule"])
             db._conn.close()
 
 

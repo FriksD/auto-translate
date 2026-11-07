@@ -68,9 +68,12 @@ function MatchRow({
               <ExternalLink className="h-4 w-4" />
             </Button>
           </a>
-          {match.window && match.monitor_id ? (
+          {match.monitor_id ? (
             <>
-              <Link to={`/monitors/${match.monitor_id}`} title={`${clock(match.window.start)}–${clock(match.window.end)} 自动监视`}>
+              <Link
+                to={`/monitors/${match.monitor_id}`}
+                title={match.window ? `${clock(match.window.start)}–${clock(match.window.end)} 自动监视` : '按赛程自动监视'}
+              >
                 <Button size="sm" variant="secondary" className="h-8">
                   <Radio className="mr-1.5 h-4 w-4" />
                   已预约 · {match.monitor_title}
@@ -80,9 +83,10 @@ function MatchRow({
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                title="取消预约"
+                title="取消预约（整个赛事不再按赛程监视）"
                 disabled={busy}
                 onClick={async () => {
+                  if (!window.confirm(`取消后直播间「${match.monitor_title}」不再按赛程监视整个赛事，确定？`)) return
                   setBusy(true)
                   try {
                     await onUnreserve(match)
@@ -167,17 +171,10 @@ export function MatchesPage() {
   const reserve = async (match: HltvMatch) => {
     try {
       const result = await api.reserveMatch(match.id)
-      setMatches((list) =>
-        list.map((m) =>
-          m.id === match.id
-            ? { ...m, monitor_id: result.monitor.id, monitor_title: result.monitor.title, window: result.window }
-            : m,
-        ),
-      )
+      await load()
       setNotice(
-        result.needs_stream
-          ? `已预约。直播间「${result.monitor.title}」还没有直播链接，正在从 HLTV 找官方流，请到直播间页确认或换成 B 站链接`
-          : '',
+        `已预约：直播间「${result.monitor.title}」按赛程自动监视整个赛事（每个比赛日第一场前 2 小时到最后一场打完后 2 小时）` +
+          (result.needs_stream ? '。还没有直播链接，正在从 HLTV 找官方流，请到直播间页确认或换成 B 站链接' : ''),
       )
     } catch (e) {
       setError((e as Error).message)
@@ -187,7 +184,7 @@ export function MatchesPage() {
   const unreserve = async (match: HltvMatch) => {
     try {
       await api.unreserveMatch(match.id)
-      setMatches((list) => list.map((m) => (m.id === match.id ? { ...m, monitor_id: null, monitor_title: null, window: null } : m)))
+      await load()
     } catch (e) {
       setError((e as Error).message)
     }

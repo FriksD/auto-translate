@@ -77,8 +77,10 @@ async def lifespan(_: FastAPI):
     cards.start()
     monitor_cards.start()
     card_callbacks.start(db.get_settings()["feishu"])
+    schedule_loop = asyncio.create_task(_schedule_loop())
     logger.info("服务已启动，数据目录：%s", config.DATA_DIR)
     yield
+    schedule_loop.cancel()
     cards.stop()
     monitor_cards.stop()
     await runner.stop()
@@ -528,15 +530,17 @@ async def list_matches(refresh: bool = False, days: int = 5):
     except Exception as error:
         raise HTTPException(502, f"抓取 HLTV 比赛列表失败：{error}")
     horizon = (time.time() + days * 86400) * 1000
-    monitors = db.list_monitors()
+    following = [m for m in db.list_monitors() if m["follow_schedule"]]
     result = []
     for match in matches:
         if match["unix_ms"] and match["unix_ms"] > horizon:
             continue
-        found = monitor.find_reservation(monitors, match["id"])
-        result.append({**match, "monitor_id": found[0]["id"] if found else None,
-                       "monitor_title": found[0]["title"] if found else None,
-                       "window": {"start": found[1]["start"], "end": found[1]["end"]} if found else None})
+        event = match.get("event") or {}
+        found = monitor.find_event_monitor(following, event.get("id"), event.get("name") or "")
+        window = monitor.window_of(found, match["id"]) if found else None
+        result.append({**match, "monitor_id": found["id"] if found else None,
+                       "monitor_title": found["title"] if found else None,
+                       "window": {"start": window["start"], "end": window["end"]} if window else None})
     return {"fetched_at": stages.hltv.cached_at("matches"), "matches": result}
 
 
@@ -552,54 +556,92 @@ async def unreserve_match(match_id: int):
 
 async def _reserve(match_id: int, reserved_by: Optional[str] = None) -> Dict[str, Any]:
     """
-    预约比赛 = 给这场比赛所属赛事的直播间加一段时间窗（开赛前 15 分钟到开赛后 5 小时），时间窗里自动监视。
+    预约比赛 = 这场比赛所属赛事的直播间按赛程自动监视：赛事里每场比赛从开赛前 2 小时到预计打完后 2 小时，
+    连着的连成一段（一个比赛日就是一段），之后每 15 分钟按 HLTV 赛程重算。
     赛事还没有直播间就新建一个，链接先从 HLTV 比赛页找官方流（后台进行），在飞书直播间卡片下提醒确认。
     预约不生成任务，任务只来自截到的采访。reserved_by：在飞书里预约的人（open_id）。
     """
-    monitors = db.list_monitors()
-    existing = monitor.find_reservation(monitors, match_id)
-    if existing:
-        raise HTTPException(409, f"这场比赛已经预约过（直播间「{existing[0]['title']}」）")
     try:
-        listed = next((m for m in (await stages.hltv.list_matches()) if m["id"] == match_id), None)
+        matches = await stages.hltv.list_matches()
     except Exception as error:
         raise HTTPException(502, f"抓取 HLTV 比赛列表失败：{error}")
+    listed = next((m for m in matches if m["id"] == match_id), None)
     if listed is None:
         raise HTTPException(404, "HLTV 赛程里找不到这场比赛")
     event = listed.get("event") or {}
     teams = " vs ".join(t["name"] or "TBD" for t in (listed["team1"], listed["team2"]))
-    now = time.time()
-    found = monitor.find_event_monitor(monitors, event.get("id"), event.get("name") or "")
+    found = monitor.find_event_monitor(db.list_monitors(), event.get("id"), event.get("name") or "")
+    if found and found["follow_schedule"]:
+        raise HTTPException(409, f"这个赛事已经按赛程监视了（直播间「{found['title']}」）")
     created = found is None
     if created:
         found = db.create_monitor(title=event.get("name") or teams, event_id=str(event["id"]) if event.get("id") else None,
                                   event_name=event.get("name") or None, streams=[])
         db.add_monitor_event(found["id"], f"预约 {teams} 时新建直播间")
-    window = monitor.reservation_window(match_id, listed["unix_ms"] / 1000 if listed.get("unix_ms") else None, teams,
-                                        db.get_settings()["monitor"], now, reserved_by)
-    # 顺便清掉一天前就结束的时间窗
-    windows = [w for w in found["windows"] if float(w.get("end") or 0) > now - 86400] + [window]
-    updated = db.update_monitor(found["id"], windows=windows)
-    span = f"{_clock(window['start'], True)}–{_clock(window['end'])}"
-    db.add_monitor_event(found["id"], f"{'在飞书' if reserved_by else ''}预约 {teams}：{span} 自动监视")
+    elif not found.get("event_id") and event.get("id"):
+        db.update_monitor(found["id"], event_id=str(event["id"]))
+    db.update_monitor(found["id"], follow_schedule=True)
+    db.add_monitor_event(found["id"], f"{'在飞书' if reserved_by else ''}预约 {teams}：整个赛事按赛程自动监视")
+    updated = _sync_schedule(db.get_monitor(found["id"]), matches, time.time())
     monitor.manager.wake()
     monitor_cards.wake()
     if not updated["streams"]:
         asyncio.create_task(_fill_official_stream(found["id"], match_id))
-    return {"title": teams, "monitor": updated, "window": window, "created": created,
+    return {"title": teams, "monitor": updated, "window": monitor.window_of(updated, match_id), "created": created,
             "needs_stream": not updated["streams"]}
 
 
 def _unreserve(match_id: int) -> Dict[str, Any]:
-    found = monitor.find_reservation(db.list_monitors(), match_id)
-    if found is None:
+    """取消预约 = 这个赛事的直播间不再按赛程监视（手动开着的不受影响）。"""
+    owner = next((m for m in db.list_monitors() if m["follow_schedule"] and monitor.window_of(m, match_id)), None)
+    if owner is None:
+        listed = next((m for m in stages.hltv.cached("matches") or [] if m["id"] == match_id), None)
+        event = (listed or {}).get("event") or {}
+        owner = monitor.find_event_monitor([m for m in db.list_monitors() if m["follow_schedule"]],
+                                           event.get("id"), event.get("name") or "") if listed else None
+    if owner is None:
         raise HTTPException(404, "这场比赛没有预约")
-    owner, window = found
-    updated = db.update_monitor(owner["id"], windows=monitor.drop_reservation(owner["windows"], match_id))
-    db.add_monitor_event(owner["id"], f"取消预约 {window.get('title') or match_id}")
+    updated = db.update_monitor(owner["id"], follow_schedule=False, windows=[])
+    db.add_monitor_event(owner["id"], "取消预约：不再按赛程监视")
     monitor.manager.wake()
     monitor_cards.wake()
-    return {"title": window.get("title") or str(match_id), "monitor": updated}
+    return {"title": owner["title"], "monitor": updated}
+
+
+def _sync_schedule(found: Dict[str, Any], matches: List[Dict[str, Any]], now: float) -> Dict[str, Any]:
+    """按 HLTV 赛程重算一个直播间的时间窗；有变化时记一条动态。"""
+    fresh = monitor.schedule_windows(monitor.event_matches(matches, found), db.get_settings()["monitor"], now)
+    windows = monitor.merge_schedule(found["windows"], fresh, now)
+    spans = lambda ws: [(round(float(w["start"])), round(float(w["end"]))) for w in ws]  # noqa: E731
+    if spans(windows) == spans(found["windows"]) and windows == found["windows"]:
+        return found
+    updated = db.update_monitor(found["id"], windows=windows)
+    if spans(windows) != spans(found["windows"]):
+        text = monitor.describe_windows(windows, now)
+        db.add_monitor_event(found["id"], f"按赛程自动监视：{text}" if text else "赛程里暂时没有接下来的比赛")
+    return updated
+
+
+async def _schedule_loop() -> None:
+    """每 15 分钟按 HLTV 赛程重算按赛程监视的直播间的时间窗。"""
+    while True:
+        try:
+            following = [m for m in db.list_monitors() if m["follow_schedule"]]
+            if following:
+                matches = await stages.hltv.list_matches()
+                now = time.time()
+                for found in following:
+                    _sync_schedule(found, matches, now)
+                monitor.manager.wake()
+                monitor_cards.wake()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("按赛程更新直播间时间窗失败：%s", error)
+        await asyncio.sleep(SCHEDULE_SYNC_SECONDS)
+
+
+SCHEDULE_SYNC_SECONDS = 900
 
 
 def _clock(ts: Optional[float], with_date: bool = False) -> str:
@@ -665,7 +707,7 @@ async def _card_action(value: Dict[str, Any], form: Dict[str, Any], operator: st
     if action == "unreserve":
         result = _unreserve(int(value["match_id"]))
         await _update_schedule(message_id, view)
-        return f"已取消预约 {result['title']}"
+        return f"已取消预约：直播间「{result['title']}」不再按赛程监视"
     if action.startswith("monitor_"):
         return await _monitor_card_action(action, int(value["monitor_id"]), form)
     label = CARD_ACTIONS.get(action)
@@ -696,8 +738,8 @@ async def _monitor_card_action(action: str, monitor_id: int, form: Dict[str, Any
         db.add_monitor_event(monitor_id, "在飞书卡片上开始监视")
         message = "已开始监视"
     elif action == "monitor_off":
-        db.update_monitor(monitor_id, enabled=False, windows=[])
-        db.add_monitor_event(monitor_id, "在飞书卡片上停止监视")
+        db.update_monitor(monitor_id, enabled=False, windows=[], follow_schedule=False)
+        db.add_monitor_event(monitor_id, "在飞书卡片上停止监视（也不再按赛程监视）")
         message = "已停止监视"
     elif action == "monitor_stream":
         url = str(form.get("url") or "").strip()
@@ -752,9 +794,10 @@ def _on_card_action(value: Dict[str, Any], form: Dict[str, Any], operator: str, 
 # ── 飞书机器人命令（群里 @机器人 或私聊） ─────────────────────────────────────
 
 def _reserved_reply(result: Dict[str, Any]) -> str:
-    window = result["window"]
-    text = (f"已预约 {result['title']}：{_clock(window['start'], True)}–{_clock(window['end'])} "
-            f"自动监视直播间「{result['monitor']['title']}」，截到的采访会各自发进度卡片")
+    spans = monitor.describe_windows(result["monitor"]["windows"], time.time())
+    text = (f"已预约 {result['title']}：直播间「{result['monitor']['title']}」按赛程自动监视整个赛事"
+            f"（每个比赛日第一场前 2 小时到最后一场打完后 2 小时）"
+            + (f"，接下来：{spans}" if spans else "") + "。截到的采访会各自发进度卡片")
     if result["needs_stream"]:
         text += "；这个赛事还没有直播链接，正在从 HLTV 找官方流，结果发在直播间卡片下"
     return text
@@ -835,7 +878,7 @@ async def _watch(url: str, name: str) -> str:
     for other in db.list_monitors():
         if other["id"] != found["id"] and monitor.is_on(other, time.time()) and any(
                 monitor.stream_key(s["url"]) == monitor.stream_key(url) for s in other["streams"]):
-            db.update_monitor(other["id"], enabled=False, windows=[])
+            db.update_monitor(other["id"], enabled=False, windows=[], follow_schedule=False)
             db.add_monitor_event(other["id"], f"这条链接改由「{updated['title']}」监视，这里停止监视：{url}")
             stopped.append(other["title"])
     monitor.manager.wake()

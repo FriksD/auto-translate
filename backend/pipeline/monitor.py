@@ -233,22 +233,79 @@ def capture_title(monitor: Dict[str, Any], capture: Dict[str, Any], wall_start: 
     return f"{event} {who} 采访 {time.strftime('%m-%d %H:%M', time.localtime(wall_start))}"
 
 
-# ── 预约 = 直播间时间窗 ─────────────────────────────────────────────────────
+# ── 预约 = 直播间按赛程监视 ─────────────────────────────────────────────────
 
-def reservation_window(match_id: int, match_time: Optional[float], title: str, cfg: Dict[str, Any], now: float,
-                       reserved_by: Optional[str] = None) -> Dict[str, Any]:
-    """预约一场比赛：开赛前 pre_match_minutes 分钟到开赛后 window_hours 小时；开赛时间未知就从现在开始。"""
-    begin = match_time - int(cfg.get("pre_match_minutes", 15)) * 60 if match_time else now
-    return {"match_id": int(match_id), "title": title, "match_time": match_time, "start": begin,
-            "end": (match_time or now) + float(cfg.get("window_hours", 5)) * 3600, "reserved_by": reserved_by}
+def match_hours(fmt: str, cfg: Dict[str, Any]) -> float:
+    """按赛制估一场比赛要打多久：图数 × map_hours（BO1 1 小时、BO3 3 小时、BO5 5 小时），赛制未知按 BO3。"""
+    digits = "".join(ch for ch in str(fmt or "") if ch.isdigit())
+    maps = int(digits) if digits and 0 < int(digits) <= 7 else 3
+    return maps * float(cfg.get("map_hours", 1))
 
 
-def find_reservation(monitors: List[Dict[str, Any]], match_id: int) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
-    for found in monitors:
-        for window in found.get("windows") or []:
-            if str(window.get("match_id")) == str(match_id):
-                return found, window
+def schedule_windows(matches: List[Dict[str, Any]], cfg: Dict[str, Any], now: float) -> List[Dict[str, Any]]:
+    """
+    赛事的比赛 → 监视时间窗：每场从开赛前 pre_hours 小时到预计打完后 post_hours 小时，重叠的连成一段。
+    一个比赛日连着打，就是第一场前 2 小时到最后一场打完后 2 小时；不按日历日切，跨午夜的赛程也是一段。
+    开赛时间未知的跳过；正在打、没有时间的按现在开赛算。
+    """
+    pre, post = float(cfg.get("pre_hours", 2)) * 3600, float(cfg.get("post_hours", 2)) * 3600
+    spans = []
+    for match in matches:
+        begin = match["unix_ms"] / 1000 if match.get("unix_ms") else (now if match.get("live") else None)
+        if begin is None:
+            continue
+        spans.append((begin - pre, begin + match_hours(match.get("format") or "", cfg) * 3600 + post, match["id"]))
+    windows: List[Dict[str, Any]] = []
+    for begin, end, match_id in sorted(spans):
+        if windows and begin <= windows[-1]["end"]:
+            windows[-1]["end"] = max(windows[-1]["end"], end)
+            windows[-1]["match_ids"].append(match_id)
+        else:
+            windows.append({"start": begin, "end": end, "match_ids": [match_id]})
+    return windows
+
+
+def merge_schedule(old: List[Dict[str, Any]], fresh: List[Dict[str, Any]], now: float) -> List[Dict[str, Any]]:
+    """
+    用新算出来的时间窗替换旧的：还没开始的旧时间窗以新的为准（赛程会改）；已经开始的留着，
+    因为打完的比赛会从 HLTV 赛程里消失，不能因此提前停录。重叠的再连成一段。
+    """
+    kept = [{"start": float(w["start"]), "end": float(w["end"]),
+             "match_ids": list(w.get("match_ids") or ([w["match_id"]] if w.get("match_id") else []))}
+            for w in old or [] if float(w["start"]) <= now < float(w["end"])]
+    merged: List[Dict[str, Any]] = []
+    for window in sorted(kept + [dict(w, match_ids=list(w["match_ids"])) for w in fresh], key=lambda w: w["start"]):
+        if merged and window["start"] <= merged[-1]["end"]:
+            merged[-1]["end"] = max(merged[-1]["end"], window["end"])
+            merged[-1]["match_ids"] += [m for m in window["match_ids"] if m not in merged[-1]["match_ids"]]
+        else:
+            merged.append(window)
+    return merged
+
+
+def event_matches(matches: List[Dict[str, Any]], monitor: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """HLTV 赛程里属于这个直播间赛事的比赛。"""
+    return [m for m in matches
+            if find_event_monitor([monitor], (m.get("event") or {}).get("id"), (m.get("event") or {}).get("name") or "")]
+
+
+def window_of(monitor: Dict[str, Any], match_id: int) -> Optional[Dict[str, Any]]:
+    """包含这场比赛的时间窗。"""
+    for window in monitor.get("windows") or []:
+        ids = window.get("match_ids") or ([window["match_id"]] if window.get("match_id") else [])
+        if any(str(i) == str(match_id) for i in ids):
+            return window
     return None
+
+
+def describe_windows(windows: List[Dict[str, Any]], now: float, limit: int = 3) -> str:
+    """「11-08 08:00–11-09 00:00、11-09 08:00–22:00」：还没结束的时间窗。"""
+    def clock(ts: float, ref: Optional[float] = None) -> str:
+        same_day = ref is not None and time.localtime(ts)[:3] == time.localtime(ref)[:3]
+        return time.strftime("%H:%M" if same_day else "%m-%d %H:%M", time.localtime(ts))
+
+    upcoming = [w for w in windows or [] if float(w["end"]) > now][:limit]
+    return "、".join(f"{clock(w['start'])}–{clock(w['end'], w['start'])}" for w in upcoming)
 
 
 def find_event_monitor(monitors: List[Dict[str, Any]], event_id: Any, event_name: str) -> Optional[Dict[str, Any]]:
@@ -264,10 +321,6 @@ def find_event_monitor(monitors: List[Dict[str, Any]], event_id: Any, event_name
         if lowered and (lowered in (n.strip().lower() for n in names) or same_event_name(event_name, names[0])):
             return found
     return None
-
-
-def drop_reservation(windows: List[Dict[str, Any]], match_id: int) -> List[Dict[str, Any]]:
-    return [w for w in windows or [] if str(w.get("match_id")) != str(match_id)]
 
 
 STREAM_PROVIDERS = ("twitch", "youtube", "kick")

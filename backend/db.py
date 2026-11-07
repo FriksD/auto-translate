@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS monitors (
     event_name TEXT,
     streams_json TEXT NOT NULL DEFAULT '[]',   -- [{url, label, proxy}]
     enabled INTEGER NOT NULL DEFAULT 0,        -- 手动开着
-    windows_json TEXT NOT NULL DEFAULT '[]',   -- 预约产生的自动监视时间窗 [{start, end, match_id}]
+    windows_json TEXT NOT NULL DEFAULT '[]',   -- 自动监视时间窗 [{start, end, match_ids}]
+    follow_schedule INTEGER NOT NULL DEFAULT 0, -- 按赛事赛程自动算时间窗（预约过这个赛事的比赛）
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -112,6 +113,7 @@ RETIRED_STATES = ("reserved", "watching", "recording", "interview_detecting", "n
 MIGRATIONS = {
     "tasks": {"match_time": "REAL"},
     "feishu_cards": {"reserved_by": "TEXT"},
+    "monitors": {"follow_schedule": "INTEGER NOT NULL DEFAULT 0"},
 }
 
 TASK_UPDATABLE = {
@@ -142,6 +144,8 @@ def init_db() -> None:
             for column, definition in columns.items():
                 if column not in existing:
                     _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        # 旧的按场预约时间窗：改成按赛程监视整个赛事
+        _conn.execute("UPDATE monitors SET follow_schedule = 1 WHERE windows_json LIKE '%\"match_id\"%'")
         marks = ", ".join("?" for _ in RETIRED_STATES)
         now = time.time()
         for row in _conn.execute(f"SELECT id FROM tasks WHERE state IN ({marks})", RETIRED_STATES).fetchall():
@@ -293,7 +297,7 @@ def invalidate_cards() -> None:
 
 # ── 直播间监视 ────────────────────────────────────────────────────────────────
 
-MONITOR_UPDATABLE = {"title", "event_id", "event_name", "streams", "enabled", "windows"}
+MONITOR_UPDATABLE = {"title", "event_id", "event_name", "streams", "enabled", "windows", "follow_schedule"}
 
 
 def _monitor_row(row: sqlite3.Row) -> Dict[str, Any]:
@@ -301,6 +305,7 @@ def _monitor_row(row: sqlite3.Row) -> Dict[str, Any]:
     monitor["streams"] = json.loads(monitor.pop("streams_json") or "[]")
     monitor["windows"] = json.loads(monitor.pop("windows_json") or "[]")
     monitor["enabled"] = bool(monitor["enabled"])
+    monitor["follow_schedule"] = bool(monitor.get("follow_schedule"))
     return monitor
 
 
@@ -311,7 +316,7 @@ def _monitor_columns(fields: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"不能修改的字段：{key}")
         if key in ("streams", "windows"):
             columns[f"{key}_json"] = json.dumps(value or [], ensure_ascii=False)
-        elif key == "enabled":
+        elif key in ("enabled", "follow_schedule"):
             columns[key] = int(bool(value))
         else:
             columns[key] = value

@@ -127,7 +127,8 @@ export interface Monitor {
   event_name: string | null
   streams: MonitorStreamConfig[]
   enabled: boolean
-  windows: { start: number; end: number; match_id?: number }[]
+  windows: { start: number; end: number; match_ids?: number[] }[]
+  follow_schedule: boolean
   created_at: number
   updated_at: number
   on: boolean
@@ -293,8 +294,9 @@ export interface Settings {
     padding_seconds: number
   }
   monitor: {
-    pre_match_minutes: number
-    window_hours: number
+    pre_hours: number
+    post_hours: number
+    map_hours: number
     offline_poll_seconds: number
     live_probe_seconds: number
     retain_hours: number
@@ -383,7 +385,7 @@ export const api = {
   listMatches: (refresh = false) =>
     request<{ fetched_at: number | null; matches: HltvMatch[] }>('GET', `/api/matches?refresh=${refresh}`),
   reserveMatch: (id: number) =>
-    request<{ title: string; monitor: Monitor; window: { start: number; end: number }; needs_stream: boolean }>(
+    request<{ title: string; monitor: Monitor; window: { start: number; end: number } | null; needs_stream: boolean }>(
       'POST', `/api/matches/${id}/reserve`, {}),
   unreserveMatch: (id: number) => request<{ title: string }>('DELETE', `/api/matches/${id}/reserve`),
 

@@ -33,6 +33,10 @@ class HLTVClient:
         self._cache[key] = (time.time(), value)
         return value
 
+    def cached(self, key: str) -> Any:
+        hit = self._cache.get(key)
+        return hit[1] if hit else None
+
     def cached_at(self, key: str) -> Optional[float]:
         hit = self._cache.get(key)
         return hit[0] if hit else None

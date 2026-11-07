@@ -226,11 +226,13 @@ export function SettingsPage() {
         <div className="space-y-4">
           <p className="text-xs text-muted-foreground">
             直播间一直录、一直转写和识别画面，发现采访就截下来生成任务。在「比赛」页或飞书赛程卡片上预约比赛，
-            就是给这个赛事的直播间加一段自动监视的时间。
+            这个赛事的直播间就按赛程自动监视：每场比赛从开赛前到预计打完后（图数 × 每张图时长）再往后一段，连着的连成一段，
+            一个比赛日就是第一场前 2 小时到最后一场打完后 2 小时。
           </p>
           <div className="grid gap-4 md:grid-cols-4">
-            <NumberField label="预约：开赛前开始监视（分钟）" value={settings.monitor.pre_match_minutes} onChange={(pre_match_minutes) => patch('monitor', { pre_match_minutes })} />
-            <NumberField label="预约：开赛后监视（小时）" value={settings.monitor.window_hours} onChange={(window_hours) => patch('monitor', { window_hours })} />
+            <NumberField label="开赛前开始监视（小时）" value={settings.monitor.pre_hours} onChange={(pre_hours) => patch('monitor', { pre_hours })} />
+            <NumberField label="预计打完后再监视（小时）" value={settings.monitor.post_hours} onChange={(post_hours) => patch('monitor', { post_hours })} />
+            <NumberField label="每张图预计时长（小时）" value={settings.monitor.map_hours} onChange={(map_hours) => patch('monitor', { map_hours })} />
             <NumberField label="未开播时探测间隔（秒）" value={settings.monitor.offline_poll_seconds} onChange={(offline_poll_seconds) => patch('monitor', { offline_poll_seconds })} />
             <NumberField label="录音保留（小时）" value={settings.monitor.retain_hours} onChange={(retain_hours) => patch('monitor', { retain_hours })} />
           </div>
