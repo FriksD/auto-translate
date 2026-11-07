@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/layout/Layout'
 import { GlossaryPage } from './pages/GlossaryPage'
 import { MatchesPage } from './pages/MatchesPage'
+import { MonitorPage, MonitorsPage } from './pages/MonitorsPage'
 import { ReviewPage } from './pages/ReviewPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { TaskPage } from './pages/TaskPage'
@@ -15,6 +16,8 @@ function App() {
         <Route path="review/:id" element={<ReviewPage />} />
         <Route path="/" element={<Layout />}>
           <Route index element={<TasksPage />} />
+          <Route path="monitors" element={<MonitorsPage />} />
+          <Route path="monitors/:id" element={<MonitorPage />} />
           <Route path="matches" element={<MatchesPage />} />
           <Route path="tasks/:id" element={<TaskPage />} />
           <Route path="glossary" element={<GlossaryPage />} />

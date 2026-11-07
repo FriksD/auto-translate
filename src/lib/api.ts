@@ -117,6 +117,78 @@ export interface LiveStatus {
   transcript: LiveLine[]
 }
 
+export interface MonitorStreamConfig {
+  url: string
+  label?: string
+  /** 走不走代理；不填按域名判断（国内平台直连） */
+  proxy?: boolean | null
+  /** 转写语言，'' 为自动识别 */
+  language?: string | null
+}
+
+export interface ShotRun {
+  start: number
+  end: number
+  open: boolean
+}
+
+export interface MonitorStreamStatus {
+  url: string
+  label: string
+  proxy: boolean
+  platform: string
+  /** offline 未开播 / recording 录制中 / replay 拉到回放 / unknown 探测失败 / stopped 没在监视 */
+  status: 'starting' | 'offline' | 'recording' | 'replay' | 'unknown' | 'stopped'
+  status_at: number | null
+  title: string
+  error: string
+  recording: boolean
+  connected: boolean
+  origin: number | null
+  chunk_count: number
+  shot_runs: ShotRun[]
+  detection: {
+    active?: { start: number; interviewees: string[]; team: string | null; pending_end: number | null } | null
+    trigger_at?: number | null
+    floor?: number
+    checked_at?: number
+    failures?: number
+  }
+  transcript?: LiveLine[]
+}
+
+export interface Monitor {
+  id: number
+  title: string
+  event_id: string | null
+  event_name: string | null
+  streams: MonitorStreamConfig[]
+  enabled: boolean
+  windows: { start: number; end: number; match_id?: number }[]
+  created_at: number
+  updated_at: number
+  on: boolean
+  stream_status: MonitorStreamStatus[]
+  events: { id: number; ts: number; level: 'info' | 'warning' | 'error'; message: string }[]
+  tasks: { id: number; title: string; state: string; created_at: number }[]
+}
+
+export interface MonitorInput {
+  title?: string
+  event_id?: string | null
+  event_name?: string | null
+  streams?: MonitorStreamConfig[]
+  enabled?: boolean
+}
+
+export interface HltvEvent {
+  id: number | null
+  name: string
+  matches: number
+  stars: number
+  first_ms: number | null
+}
+
 export interface MatchContext {
   id: number
   url: string
@@ -131,8 +203,20 @@ export interface MatchContext {
   streams: Stream[]
 }
 
+export interface Identified {
+  interviewees: string[]
+  team: string | null
+  opponent: string | null
+  about_match: 'just_played' | 'between_maps' | 'upcoming' | 'general' | 'unknown'
+  result: 'won' | 'lost' | null
+  note?: string
+}
+
 export interface TaskContext {
-  match?: MatchContext
+  /** 直播间监视截下来的采访才有，背景信息里的比赛可能只有赛事名 */
+  match?: Partial<MatchContext> & { event?: string; source?: string }
+  monitor?: { id: number; event_name?: string | null; event_id?: string | null }
+  identified?: Identified
   teams?: TeamContext[]
   extra_names?: string[]
   background?: string
@@ -330,6 +414,17 @@ export const api = {
   liveSetSource: (id: number, bo3: string) => request<{ ok: boolean }>('PUT', `/api/tasks/${id}/live/source`, { bo3 }),
   liveAudioUrl: (id: number, start: number, end: number) =>
     `/api/tasks/${id}/live/audio?start=${start.toFixed(1)}&end=${end.toFixed(1)}`,
+
+  listMonitors: () => request<Monitor[]>('GET', '/api/monitors'),
+  getMonitor: (id: number, tail = 300) => request<Monitor>('GET', `/api/monitors/${id}?tail=${tail}`),
+  createMonitor: (body: MonitorInput) => request<Monitor>('POST', '/api/monitors', body),
+  updateMonitor: (id: number, body: MonitorInput) => request<Monitor>('PUT', `/api/monitors/${id}`, body),
+  deleteMonitor: (id: number) => request<{ ok: boolean }>('DELETE', `/api/monitors/${id}`),
+  monitorEvents: () => request<{ events: HltvEvent[]; error: string | null }>('GET', '/api/monitors/events'),
+  monitorAudioUrl: (id: number, index: number, start: number, end: number) =>
+    `/api/monitors/${id}/streams/${index}/audio?start=${start.toFixed(1)}&end=${end.toFixed(1)}`,
+  monitorCapture: (id: number, index: number, start: number, end: number, interviewees: string[]) =>
+    request<Task>('POST', `/api/monitors/${id}/streams/${index}/capture`, { start, end, interviewees }),
 
   listMatches: (refresh = false) =>
     request<{ fetched_at: number | null; matches: HltvMatch[] }>('GET', `/api/matches?refresh=${refresh}`),

@@ -53,6 +53,9 @@ SAME_START = 60
 PRUNE_INTERVAL = 600
 # 没有开播信息时（探测出错）也试着录：最多每隔多久试一次
 LOOP_SECONDS = 5
+# 一批画面前后这么多秒内转写里一句话都没有，就不交给视觉模型（直接标 other）：没人说话不会是采访。
+# 实测 B 站 IEM 北京主舞台比赛日之间一直「在播」，画面是静音的 THANKS FOR WATCHING，不跳过就一直花钱
+SILENT_MARGIN = 30
 
 _locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
 
@@ -211,6 +214,17 @@ def step_detection(det: Dict[str, Any], interviews: List[Dict[str, Any]], runs: 
         events.append(("info", f"初步判断采访在 {prompts.format_timestamp(end)} 结束，等下一次判断确认"))
     det["active"] = active
     return det, captures, events
+
+
+def transcribed_until(chunks: List[Path], transcribed: List[str], origin: float) -> float:
+    """转写已经覆盖到哪里（相对 origin 的秒数）：已转写分段里最晚的结束时间。"""
+    done = set(transcribed)
+    ends = [begin + duration for chunk, begin, duration in chunk_timeline(chunks, origin) if chunk.name in done]
+    return max(ends) if ends else 0.0
+
+
+def is_silent(lines: List[Dict[str, Any]], begin: float, end: float) -> bool:
+    return not any(line["end"] >= begin - SILENT_MARGIN and line["start"] <= end + SILENT_MARGIN for line in lines)
 
 
 def capture_title(monitor: Dict[str, Any], capture: Dict[str, Any], wall_start: float) -> str:
@@ -518,12 +532,20 @@ class StreamSession:
             return
         settings = db.get_settings()
         timeline = frame_timeline(pending, state["origin"])
+        covered = transcribed_until(self.files.chunks(), state.get("transcribed") or [], state["origin"])
+        lines = self.files.transcript()
         for begin in range(0, len(timeline), SHEET_SIZE):
             batch = timeline[begin:begin + SHEET_SIZE]
             if len(batch) < SHEET_SIZE and self.recording:
                 return
             if self._stop.is_set():
                 return
+            first, last = batch[0][1], batch[-1][1]
+            if covered < last + SILENT_MARGIN and self.recording:
+                return  # 等转写跟上，才知道这段有没有人说话
+            if is_silent(lines, first, last):
+                self._write_shots(batch, ["other"] * len(batch))
+                continue
             try:
                 answer = stages._parse_json_object(stages._llm_call(
                     settings, detect_step(settings), prompts.SHOT_SYSTEM, prompts.build_shot_prompt(len(batch)),
@@ -538,9 +560,12 @@ class StreamSession:
                 if self._shot_failures < LLM_ALERT_FAILURES:
                     return
                 labels = ["other"] * len(batch)
-            with open(self.files.shots_path, "a", encoding="utf-8") as fh:
-                for (frame, t), label in zip(batch, labels):
-                    fh.write(json.dumps({"file": frame.name, "t": round(t, 1), "label": label}) + "\n")
+            self._write_shots(batch, labels)
+
+    def _write_shots(self, batch: List[Tuple[Path, float]], labels: List[str]) -> None:
+        with open(self.files.shots_path, "a", encoding="utf-8") as fh:
+            for (frame, t), label in zip(batch, labels):
+                fh.write(json.dumps({"file": frame.name, "t": round(t, 1), "label": label}) + "\n")
 
     # 封面候选
     def _grab_still(self) -> None:
@@ -710,6 +735,13 @@ class StreamSession:
         self.manager.enqueue(task_id)
         return db.get_task(task_id)
 
+    def audio(self, start: float, end: float, output: Any) -> float:
+        """试听：把 [start, end]（相对 origin 的秒数）写成 wav。正在写的分段不算。"""
+        origin = self.files.load().get("origin")
+        if origin is None:
+            raise RuntimeError("还没有录音")
+        return cut_audio(chunk_timeline(self._completed_chunks(), origin), start, end, output)
+
     def status(self, transcript_tail: int = 0) -> Dict[str, Any]:
         state = self.files.load()
         shots = self.files.shots()
@@ -717,7 +749,8 @@ class StreamSession:
         result = {
             "url": self.url, "label": self.stream.get("label") or "", "proxy": bool(self.stream.get("proxy")),
             "platform": stream_status.platform(self.url),
-            "status": state.get("status") or "starting", "status_at": state.get("status_at"),
+            "status": (state.get("status") or "starting") if self._thread else "stopped",
+            "status_at": state.get("status_at"),
             "title": state.get("title") or "", "error": state.get("error") or "",
             "recording": self.recording, "connected": bool(self.recorder and self.recorder.connected_since),
             "origin": state.get("origin"), "chunk_count": len(chunks),
@@ -799,24 +832,20 @@ class MonitorManager:
                     db.add_monitor_event(monitor["id"], f"开始监视：{stream['url']}"
                                                         f"（{'走代理' if stream.get('proxy') else '直连'}）")
 
-    def session(self, monitor_id: int, index: int) -> Optional[StreamSession]:
-        monitor = db.get_monitor(monitor_id)
-        if not monitor or index >= len(monitor["streams"]):
-            return None
-        return self.sessions.get((monitor_id, stream_key(monitor["streams"][index]["url"])))
+    def session(self, monitor: Dict[str, Any], index: int) -> StreamSession:
+        """这条链接的会话：在监视就是正在跑的那个，没在监视就给一个不启动的（读录音、试听、手动截取用）。"""
+        if not 0 <= index < len(monitor["streams"]):
+            raise IndexError("没有这条直播链接")
+        stream = monitor["streams"][index]
+        running = self.sessions.get((monitor["id"], stream_key(stream["url"])))
+        return running or StreamSession(self, monitor["id"], stream)
 
     def status(self, monitor: Dict[str, Any], transcript_tail: int = 0) -> Dict[str, Any]:
-        streams = []
-        for stream in monitor["streams"]:
-            session = self.sessions.get((monitor["id"], stream_key(stream["url"])))
-            if session:
-                streams.append(session.status(transcript_tail))
-            else:
-                state = StreamFiles(monitor["id"], stream["url"]).load()
-                streams.append({**stream, "platform": stream_status.platform(stream["url"]), "status": "stopped",
-                                "recording": False, "title": state.get("title") or ""})
+        streams = [self.session(monitor, index).status(transcript_tail) for index in range(len(monitor["streams"]))]
         return {**monitor, "on": is_on(monitor, time.time()), "stream_status": streams,
-                "events": db.recent_monitor_events(monitor["id"], 30)}
+                "events": db.recent_monitor_events(monitor["id"], 30),
+                "tasks": [{"id": t["id"], "title": t["title"], "state": t["state"], "created_at": t["created_at"]}
+                          for t in self._monitor_tasks(monitor["id"])[:20]]}
 
     # 给转写和采访定位用的名字：这个直播间截到的采访任务里已经识别出的队伍和选手
     @staticmethod

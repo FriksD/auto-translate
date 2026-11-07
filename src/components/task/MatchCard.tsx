@@ -9,35 +9,42 @@ export function MatchCard({ context }: { context: TaskContext }) {
   if (!match) return null
   const names = (context.teams ?? []).map((t) => t.name)
   const [team1, team2] = [names[0] ?? 'TBD', names[1] ?? 'TBD']
-  const streams = [...match.streams].sort((a, b) => (b.viewers ?? 0) - (a.viewers ?? 0)).slice(0, 6)
+  const streams = [...(match.streams ?? [])].sort((a, b) => (b.viewers ?? 0) - (a.viewers ?? 0)).slice(0, 6)
 
   return (
     <Card className="space-y-3 text-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="space-x-2">
           <span className="font-semibold">{match.event}</span>
-          <span className="text-muted-foreground">{match.format}</span>
+          {match.format && <span className="text-muted-foreground">{match.format}</span>}
         </div>
-        <a href={match.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
-          HLTV <ExternalLink className="h-3.5 w-3.5" />
-        </a>
+        {match.url && (
+          <a href={match.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+            {match.source === 'bo3' ? 'bo3.gg' : 'HLTV'} <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        )}
       </div>
+      {(context.teams?.length ?? 0) > 0 && (
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
         <span>
           {team1}
-          {match.status !== 'upcoming' && match.score[0] !== null && (
+          {match.score && match.score[0] != null ? (
             <span className="mx-2 font-mono font-semibold">
               {match.score[0]} : {match.score[1]}
             </span>
+          ) : (
+            <span className="mx-2 text-muted-foreground">vs</span>
           )}
-          {match.status === 'upcoming' && <span className="mx-2 text-muted-foreground">vs</span>}
           {team2}
         </span>
-        <span className="text-muted-foreground">
-          {formatMatchTime(match.unix_ms)} · {STATUS_LABELS[match.status]}
-        </span>
+        {match.status && (
+          <span className="text-muted-foreground">
+            {formatMatchTime(match.unix_ms)} · {STATUS_LABELS[match.status]}
+          </span>
+        )}
       </div>
-      {match.maps.length > 0 && (
+      )}
+      {match.maps && match.maps.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {match.maps.map((m) => (
             <span key={m.name} className="rounded border px-2 py-0.5 text-xs">

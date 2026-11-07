@@ -290,6 +290,99 @@ class StoredTest(unittest.TestCase):
             self.assertEqual(manager.sessions, {})
 
 
+class SilentFramesTest(unittest.TestCase):
+    """没人说话的画面不交给视觉模型；转写还没覆盖到的画面先不判断。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        config.use_data_dir(Path(self.tmp.name))
+        db.init_db()
+        created = db.create_monitor(title="IEM 北京", streams=monitor.normalize_streams(
+            [{"url": "https://live.bilibili.com/35"}]), enabled=True)
+        self.session = monitor.StreamSession(unittest.mock.Mock(), created["id"], created["streams"][0])
+        self.origin = time.mktime(time.strptime("2026-11-08 12:00:00", "%Y-%m-%d %H:%M:%S"))
+        files = self.session.files
+        chunks = [write_chunk(files.chunk_dir, self.origin + i * 30, 30, 0) for i in range(6)]
+        files.patch(origin=self.origin, transcribed=[c.name for c in chunks])
+        files.frame_dir.mkdir(parents=True)
+        for i in range(18):  # 0～85 秒、90～175 秒两批
+            name = time.strftime("f_%Y%m%d_%H%M%S.jpg", time.localtime(self.origin + i * 5 + (5 if i >= 9 else 0)))
+            (files.frame_dir / name).write_bytes(b"x")
+
+    def tearDown(self):
+        db._conn.close()
+        self.tmp.cleanup()
+
+    def test_silent_batches_skip_llm(self):
+        with open(self.session.files.transcript_path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"start": 120, "end": 130, "text": "how does it feel"}) + "\n")
+        answer = json.dumps({"labels": ["interview"] * 9})
+        with unittest.mock.patch("backend.pipeline.stages._llm_call", return_value=answer) as llm,                 unittest.mock.patch.object(monitor, "make_sheet", return_value=b""):
+            self.session._classify_frames()
+        self.assertEqual(llm.call_count, 1)  # 只有有人说话的第二批
+        labels = [s["label"] for s in self.session.files.shots()]
+        self.assertEqual(labels, ["other"] * 9 + ["interview"] * 9)
+
+    def test_waits_for_transcription(self):
+        self.session.recorder = unittest.mock.Mock(running=True)
+        self.session.files.patch(transcribed=[])
+        with unittest.mock.patch("backend.pipeline.stages._llm_call") as llm:
+            self.session._classify_frames()
+        llm.assert_not_called()
+        self.assertEqual(self.session.files.shots(), [])
+
+    def test_transcribed_until(self):
+        chunks = self.session.files.chunks()
+        self.assertAlmostEqual(monitor.transcribed_until(chunks, [chunks[0].name], self.origin), 30, places=1)
+        self.assertEqual(monitor.transcribed_until(chunks, [], self.origin), 0)
+
+
+class ApiTest(unittest.TestCase):
+    """手动截取、试听、停着的直播间也能看转写。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        config.use_data_dir(Path(self.tmp.name))
+        db.init_db()
+
+    def tearDown(self):
+        db._conn.close()
+        self.tmp.cleanup()
+
+    def test_manual_capture_and_status_when_stopped(self):
+        import asyncio
+        from fastapi import HTTPException
+        from backend import app
+
+        created = db.create_monitor(title="IEM 北京", event_name="IEM Beijing 2026", streams=monitor.normalize_streams(
+            [{"url": "https://live.bilibili.com/35"}]), enabled=False)
+        files = monitor.StreamFiles(created["id"], "https://live.bilibili.com/35")
+        origin = time.time() - 600
+        files.patch(origin=origin)
+        for i in range(4):
+            write_chunk(files.chunk_dir, origin + i * 30, 30, 1)
+        with open(files.transcript_path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"start": 40, "end": 45, "text": "hello"}) + "\n")
+
+        status = asyncio.run(app.get_monitor(created["id"], tail=50))
+        self.assertFalse(status["on"])
+        self.assertEqual(status["stream_status"][0]["status"], "stopped")
+        self.assertEqual(status["stream_status"][0]["transcript"][0]["text"], "hello")
+
+        audio = asyncio.run(app.monitor_audio(created["id"], 0, 30, 60))
+        self.assertEqual(audio.media_type, "audio/wav")
+        with unittest.mock.patch.object(monitor.cards, "track"),                 unittest.mock.patch.object(monitor.manager, "enqueue") as enqueue:
+            task = asyncio.run(app.monitor_capture(created["id"], 0, app.MonitorCapture(
+                start=30, end=60, interviewees=["ZywOo", " "])))
+        enqueue.assert_called_once_with(task["id"])
+        self.assertIn("ZywOo", task["title"])
+        self.assertEqual(asyncio.run(app.get_monitor(created["id"]))["tasks"][0]["id"], task["id"])
+        with self.assertRaises(HTTPException):
+            asyncio.run(app.monitor_capture(created["id"], 1, app.MonitorCapture(start=0, end=10)))
+        with self.assertRaises(HTTPException):
+            asyncio.run(app.monitor_capture(created["id"], 0, app.MonitorCapture(start=60, end=30)))
+
+
 class OfflineTest(unittest.TestCase):
     """未开播时不录、不提醒；开播后开始录；B 站下播就停录。"""
 

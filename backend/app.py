@@ -524,8 +524,6 @@ async def live_audio(task_id: int, start: float, end: float):
     return Response(buffer.getvalue(), media_type="audio/wav")
 
 
-# ── HLTV 比赛 ─────────────────────────────────────────────────────────────────
-
 # ── 直播间监视 ────────────────────────────────────────────────────────────────
 
 class MonitorStream(BaseModel):
@@ -576,6 +574,65 @@ async def create_monitor(body: MonitorBody):
     return monitor.manager.status(created)
 
 
+@app.get("/api/monitors/events")
+async def monitor_events():
+    """HLTV 赛程里的赛事（新建直播间监视时选）。HLTV 打不开时返回空列表，可以手填赛事名。"""
+    try:
+        matches = await stages.hltv.list_matches()
+    except Exception as error:
+        return {"events": [], "error": f"读取 HLTV 赛程失败：{error}"}
+    events: Dict[str, Dict[str, Any]] = {}
+    for match in matches:
+        event = match.get("event") or {}
+        if not event.get("name"):
+            continue
+        entry = events.setdefault(str(event.get("id") or event["name"]), {
+            "id": event.get("id"), "name": event["name"], "matches": 0, "stars": 0, "first_ms": None})
+        entry["matches"] += 1
+        entry["stars"] = max(entry["stars"], match.get("stars") or 0)
+        if match.get("unix_ms") and (entry["first_ms"] is None or match["unix_ms"] < entry["first_ms"]):
+            entry["first_ms"] = match["unix_ms"]
+    ordered = sorted(events.values(), key=lambda e: (-e["stars"], e["first_ms"] or 0))
+    return {"events": ordered, "error": None}
+
+
+class MonitorCapture(BaseModel):
+    start: float
+    end: float
+    interviewees: List[str] = []
+
+
+def _monitor_session(monitor_id: int, index: int) -> "monitor.StreamSession":
+    try:
+        return monitor.manager.session(_require_monitor(monitor_id), index)
+    except IndexError as error:
+        raise HTTPException(404, str(error))
+
+
+@app.get("/api/monitors/{monitor_id}/streams/{index}/audio")
+async def monitor_audio(monitor_id: int, index: int, start: float, end: float):
+    """试听某条链接录音的一段（相对这一轮录制开始的秒数，最长 10 分钟）。"""
+    session = _monitor_session(monitor_id, index)
+    buffer = io.BytesIO()
+    try:
+        await run_in_threadpool(session.audio, start, min(end, start + 600), buffer)
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(400, str(error))
+    return Response(buffer.getvalue(), media_type="audio/wav")
+
+
+@app.post("/api/monitors/{monitor_id}/streams/{index}/capture")
+async def monitor_capture(monitor_id: int, index: int, body: MonitorCapture):
+    """手动标注一段采访：截下来生成任务。"""
+    session = _monitor_session(monitor_id, index)
+    capture = {"start": body.start, "end": body.end, "source": "manual",
+               "interviewees": [n.strip() for n in body.interviewees if n.strip()], "team": None}
+    try:
+        return await run_in_threadpool(session.capture, capture)
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(400, str(error))
+
+
 @app.get("/api/monitors/{monitor_id}")
 async def get_monitor(monitor_id: int, tail: int = 200):
     return monitor.manager.status(_require_monitor(monitor_id), transcript_tail=tail)
@@ -598,6 +655,8 @@ async def delete_monitor(monitor_id: int):
     db.delete_monitor(monitor_id)
     return {"ok": True}
 
+
+# ── HLTV 比赛 ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/matches")
 async def list_matches(refresh: bool = False, days: int = 5):

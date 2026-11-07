@@ -6,6 +6,7 @@ import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge, Card, ErrorText, Select } from '@/components/ui/form'
 import { ContextEditor } from '@/components/task/ContextEditor'
+import { InterviewPanel } from '@/components/task/InterviewPanel'
 import { LivePanel } from '@/components/task/LivePanel'
 import { MatchCard } from '@/components/task/MatchCard'
 import { StageStepper } from '@/components/task/StageStepper'
@@ -170,6 +171,8 @@ export function TaskPage() {
   }
 
   const progress = task.progress
+  // 直播间监视截下来的采访：没有预约、比分、录制这些，「直播」标签只看采访来源和识别结果
+  const fromMonitor = !!task.context.monitor
   const saveText = (name: string) => async (text: string) => {
     await api.saveText(task.id, name, text)
     await load()
@@ -292,7 +295,7 @@ export function TaskPage() {
       <Card>
         <Tabs defaultValue={task.source_type === 'live' && isLive(task.state) ? 'live' : 'draft'}>
           <TabsList className="mb-4 flex-wrap">
-            {task.source_type === 'live' && <TabsTrigger value="live">直播</TabsTrigger>}
+            {task.source_type === 'live' && <TabsTrigger value="live">{fromMonitor ? '采访来源' : '直播'}</TabsTrigger>}
             <TabsTrigger value="draft">中文稿</TabsTrigger>
             <TabsTrigger value="clean">英文清洗稿</TabsTrigger>
             <TabsTrigger value="transcript">转写原文</TabsTrigger>
@@ -303,7 +306,7 @@ export function TaskPage() {
           </TabsList>
           {task.source_type === 'live' && (
             <TabsContent value="live">
-              <LivePanel task={task} onChanged={load} />
+              {fromMonitor ? <InterviewPanel task={task} /> : <LivePanel task={task} onChanged={load} />}
             </TabsContent>
           )}
           <TabsContent value="draft">
