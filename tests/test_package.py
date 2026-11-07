@@ -143,16 +143,19 @@ class StoredTest(unittest.TestCase):
         self.assertTrue(any("截取采访画面失败" in w for w in result["warnings"]))
 
         # 初稿阶段不往飞书发标题、摘要、封面：生成完成后没有任何发送
-        self.assertEqual(result["summary"], "摘要（听译，可能存在出入）。")
+        self.assertEqual(result["summary"], "摘要。（听译，可能存在出入）")
 
     def test_summary_note_added_once_before_final_period(self):
         note = package.with_summary_note
         self.assertEqual(note("甲击败乙；比赛结束后，max接受了采访，谈论了队伍的困境。"),
-                         "甲击败乙；比赛结束后，max接受了采访，谈论了队伍的困境（听译，可能存在出入）。")
-        self.assertEqual(note("甲击败乙，max接受了采访"), "甲击败乙，max接受了采访（听译，可能存在出入）。")
-        already = "甲击败乙，max接受了采访（听译，可能存在出入）。"
+                         "甲击败乙；比赛结束后，max接受了采访，谈论了队伍的困境。（听译，可能存在出入）")
+        self.assertEqual(note("甲击败乙，max接受了采访"), "甲击败乙，max接受了采访。（听译，可能存在出入）")
+        already = "甲击败乙，max接受了采访。（听译，可能存在出入）"
         self.assertEqual(note(already), already)
         self.assertEqual(note(""), "")
+        # LLM 自己把备注写在句号前面：挪到句号之后，只留一份
+        self.assertEqual(note("甲击败乙，谈论了状态（听译，可能存在出入）。"), "甲击败乙，谈论了状态。（听译，可能存在出入）")
+        self.assertEqual(note("甲击败乙，谈论了状态（听译，可能存在出入）"), "甲击败乙，谈论了状态。（听译，可能存在出入）")
 
 
 if __name__ == "__main__":

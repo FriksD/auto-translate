@@ -6,6 +6,9 @@
 主数据源没有回合比分（bo3.gg 的普通比赛）时：决胜图开打后改从 HLTV 比分板读回合比分，照常按比分判断；
 HLTV 也读不到时，决胜图开打 no_score_record_minutes 分钟后开始录制（开打时间来自 bo3.gg，没有就用第一次看到的时刻）。
 
+没有地图在打的时候（赛前、图间）也录制，地图开打（数据源报 live）就停，打完再录；这段录音只做转写，
+不找采访、不识别画面，用来让赛后监听知道赛前/图间发生过什么，也能手动标注。决胜图收尾的录制逻辑不变。
+
 比分从 match_sources 里按设置的顺序读取（默认 bo3.gg → HLTV），前一个失败自动换下一个。
 全部失败时：提醒人工；开赛后持续失败超过 SOURCE_DOWN_RECORD 秒，保险起见直接开始录制
 （采访定位在录制期间一直在跑，不依赖"比赛结束"信号）。
@@ -63,6 +66,10 @@ def assess(match: Dict[str, Any], cfg: Dict[str, Any], recording: bool = False,
     leader = max(live[("team1", "team2")[side]] for side in match_point) if live and deciding else None
     overtime = bool(live and min(live["team1"], live["team2"]) >= 12)
 
+    # 没有地图在打：赛前、图间。这时才可能有采访，值得录；地图正在打的时候不录（决胜图收尾由 should_record 管）
+    map_in_play = status == "live" and current_map is not None
+    off_map = status != "over" and not map_in_play and bool(cfg.get("record_off_map", True))
+
     intervals = cfg["intervals"]
     no_score = deciding and not has_round_score and current_map is not None
     no_score_record, wait_left = False, 0.0
@@ -77,8 +84,19 @@ def assess(match: Dict[str, Any], cfg: Dict[str, Any], recording: bool = False,
         interval, reason = intervals["recording"], "录制中，等待比赛结束"
     elif status == "over":
         interval, reason = intervals["recording"], "比赛已结束"
+    elif off_map:
+        interval, reason = intervals["recording"], "没有地图在打（赛前或图间）"
     elif not deciding:
         interval, reason = intervals["idle"], "未开赛" if status != "live" else "非决胜图"
+        if map_in_play and live:
+            # 非决胜图：打完马上就是图间，按当前回合数加密检查，别让 10 分钟的空闲间隔错过图间的开头
+            top = max(live["team1"], live["team2"])
+            if overtime or top >= int(cfg["late_at"]):
+                interval = intervals["late"]
+            elif top >= int(cfg["mid_at"]):
+                interval = intervals["mid"]
+        elif map_in_play:
+            interval = min(int(interval), int(intervals["mid"]))
     elif no_score_record:
         interval, reason = intervals["recording"], "决胜图进行中（没有回合比分，按开打时长开始录制）"
     elif no_score:
@@ -112,6 +130,8 @@ def assess(match: Dict[str, Any], cfg: Dict[str, Any], recording: bool = False,
         "interval": int(interval),
         "reason": reason,
         "should_record": should_record,
+        "map_in_play": map_in_play,
+        "off_map": off_map,
     }
 
 
@@ -262,12 +282,23 @@ class MatchWatcher:
             notified["start"] = True
             db.add_event(task_id, f"比赛已开始：{summary}")
 
-        if assessment["should_record"] and task["state"] == State.WATCHING and not self.live.is_recording(task_id):
+        window = assessment["off_map"] and not assessment["should_record"]
+        if ((assessment["should_record"] or window) and task["state"] == State.WATCHING
+                and not self.live.is_recording(task_id)):
             if await self._start_recording(task, state, summary, notified):
                 task["state"] = State.RECORDING
-                patch_state(task_id, record_wins=assessment["map_wins"])
+                patch_state(task_id, record_wins=assessment["map_wins"], record_reason="window" if window else "end",
+                            **({} if window else {"classify_from": time.time()}))
+                if window:
+                    db.add_event(task_id, f"没有地图在打，开始录制赛前/图间：{summary}")
+        elif recording and state.get("record_reason") == "window":
+            if assessment["should_record"]:
+                # 图间录制中，决胜图收尾的录制条件到了：接着录，转入赛后采访监听
+                patch_state(task_id, record_reason="end", classify_from=time.time())
+            elif assessment["map_in_play"]:
+                await self._pause_recording(task, summary, f"地图开打（{summary}），暂停录制，打完再录")
         elif recording and series_continued(state.get("record_wins"), assessment):
-            await self._pause_recording(task, summary)
+            await self._pause_recording(task, summary, f"{summary}，系列赛还没结束，等下一张决胜图再录")
 
         if assessment["status"] == "over" and not state.get("match_over_at"):
             await self._on_match_over(task, match, summary)
@@ -292,17 +323,18 @@ class MatchWatcher:
             return match
         return {**match, "live": score, "has_round_score": True, "round_source": "hltv"}
 
-    async def _pause_recording(self, task: Dict[str, Any], summary: str) -> None:
-        """自动开录的那张图打完了、系列赛还没结束：停止录制，回到监视，等下一张决胜图。"""
+    async def _pause_recording(self, task: Dict[str, Any], summary: str, reason: str) -> None:
+        """停止录制，回到监视：自动开录的那张图打完了系列赛还没结束，或者图间录制遇到地图开打。"""
         task_id = task["id"]
-        await asyncio.to_thread(self.live.stop, task_id, f"系列赛未结束（{summary}），等下一张决胜图再录")
+        await asyncio.to_thread(self.live.stop, task_id, reason)
         db.update_task(task_id, state=State.WATCHING)
 
         def reset(s: Dict[str, Any]) -> None:
             s.pop("record_wins", None)
+            s.pop("record_reason", None)
             s.pop("detection", None)  # 图间的转写不会有赛后采访，判断从头开始
         mutate_state(task_id, reset)
-        db.add_event(task_id, f"暂停录制：{summary}，系列赛还没结束，等下一张决胜图再录")
+        db.add_event(task_id, f"暂停录制：{reason}")
 
     async def _start_recording(self, task: Dict[str, Any], state: Dict[str, Any], summary: str,
                                notified: Dict[str, Any]) -> bool:

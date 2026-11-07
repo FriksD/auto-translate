@@ -62,6 +62,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "sources": ["bo3", "hltv"],
         # 开赛前多少分钟开始监视
         "pre_match_minutes": 15,
+        # 没有地图在打（赛前、图间）时也录制：这时才可能有选手采访，地图进行中不录。决胜图收尾的录制不受影响
+        "record_off_map": True,
         # 轮询间隔（秒）：非决胜图 / 决胜图领先方 < mid_at；领先方达到 mid_at；达到 late_at 或加时；录制中
         "intervals": {"idle": 600, "mid": 300, "late": 120, "recording": 60},
         "mid_at": 8,
@@ -98,9 +100,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         # 摘要范例：同上
         "summary_examples": [
             "PGL布加勒斯特大师赛-2026今日正式落下帷幕，MOUZ以2-0的比分击败Vitality，以季军的名次结束了他们本次赛事的征程；"
-            "比赛结束后，xertioN接受了BanKs的采访，谈论了球队对阵Vitality时的心态与后续的目标（听译，可能存在出入）。",
+            "比赛结束后，xertioN接受了BanKs的采访，谈论了球队对阵Vitality时的心态与后续的目标。（听译，可能存在出入）",
             "PGL布加勒斯特大师赛-2026今日继续，就在刚刚，FURIA以2-1的比分击败MOUZ，成功晋级决赛；"
-            "比赛结束后，molodoy接受了BanKs的采访，谈论了这场比赛的关键回合与自己的状态（听译，可能存在出入）。",
+            "比赛结束后，molodoy接受了BanKs的采访，谈论了这场比赛的关键回合与自己的状态。（听译，可能存在出入）",
         ],
         # 采访主持人，一行一个：「赛事关键词=主持人」按赛事名匹配（不区分大小写），只写名字的帮助 LLM 从转写里认人
         "hosts": ["PGL=BanKs"],

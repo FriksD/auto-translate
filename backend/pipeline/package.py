@@ -82,14 +82,16 @@ def update(task_id: int, title: Optional[str] = None, summary: Optional[str] = N
 
 
 SUMMARY_NOTE = "（听译，可能存在出入）"
+SUMMARY_NOTE_RE = re.compile(r"[（(]\s*听译[，,]\s*可能存在出入\s*[）)]")
 
 
 def with_summary_note(summary: str) -> str:
-    """摘要末尾带上「听译」备注：句号前面，已经写了就不重复。"""
+    """摘要末尾带上「听译」备注：放在句号之后。不管 LLM 把备注写在句号前还是后，都统一挪到句号之后，只留一份。"""
     summary = summary.strip()
-    if not summary or "听译" in summary:
+    if not summary:
         return summary
-    return summary.rstrip("。") + SUMMARY_NOTE + "。"
+    body = SUMMARY_NOTE_RE.sub("", summary).strip().rstrip("。")
+    return body + "。" + SUMMARY_NOTE
 
 
 def chosen_title(package: Dict[str, Any]) -> str:

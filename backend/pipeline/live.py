@@ -499,8 +499,12 @@ class LiveSession:
         if not frame_dir.exists():
             return
         state = load_state(self.task_id)
+        if state.get("record_reason") == "window":
+            return  # 赛前/图间只录音录像，不做画面识别（省模型调用）
         done = {shot["file"] for shot in read_shots(self.task_id)}
-        pending = [f for f in sorted(frame_dir.glob("f_*.jpg"))[:-1] if f.name not in done]
+        # 赛前/图间录下的画面不识别，从转入赛后监听（classify_from）之后的开始
+        floor = state.get("classify_from", 0)
+        pending = [f for f in sorted(frame_dir.glob("f_*.jpg"))[:-1] if f.name not in done and frame_time(f) >= floor]
         if not pending:
             return
         settings = db.get_settings()
@@ -542,6 +546,8 @@ class LiveSession:
         state = load_state(self.task_id)
         if state.get("stream_down_since") or db.get_task(self.task_id)["state"] not in LIVE_STATES:
             return
+        if state.get("record_reason") == "window":
+            return  # 赛前/图间的采访画面不是这场的封面
         shots = read_shots(self.task_id)
         latest = shots[-1] if shots else None
         on_camera = bool(latest and latest["label"] == "interview"
@@ -615,6 +621,8 @@ class LiveSession:
         settings = db.get_settings()
         state = load_state(self.task_id)
         detection = state.get("detection") or {}
+        if state.get("record_reason") == "window":
+            return  # 赛前/图间录制期间不找赛后采访：这时的采访不属于这场的赛后采访
         lines = read_transcript(self.task_id)
         if not lines:
             return

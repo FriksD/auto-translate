@@ -92,7 +92,25 @@ class AssessTest(unittest.TestCase):
         result = watcher.assess(make_match(live_score=(12, 3)), CFG)
         self.assertFalse(result["deciding"])
         self.assertFalse(result["should_record"])
-        self.assertEqual(result["interval"], CFG["intervals"]["idle"])
+        # 非决胜图打到 12:3：马上就是图间，检查加密到 late 间隔
+        self.assertEqual(result["interval"], CFG["intervals"]["late"])
+        self.assertEqual(watcher.assess(make_match(live_score=(3, 2)), CFG)["interval"], CFG["intervals"]["idle"])
+
+    def test_off_map_windows_are_recorded(self):
+        # 地图正在打：不录
+        playing = watcher.assess(make_match(live_score=(3, 2)), CFG)
+        self.assertTrue(playing["map_in_play"])
+        self.assertFalse(playing["off_map"])
+        # 开赛前（还没有地图）、图间（上一张打完下一张还没开）：录，并且按录制间隔检查
+        for match in (make_match(status="upcoming"), make_match(finished=(1,)), make_match(finished=(1, 2))):
+            result = watcher.assess(match, CFG)
+            self.assertTrue(result["off_map"])
+            self.assertFalse(result["should_record"])
+            self.assertEqual(result["interval"], CFG["intervals"]["recording"])
+        # 比赛结束走原来的逻辑，不算图间
+        self.assertFalse(watcher.assess(make_match(status="over", finished=(1, 1)), CFG)["off_map"])
+        # 关掉开关
+        self.assertFalse(watcher.assess(make_match(status="upcoming"), {**CFG, "record_off_map": False})["off_map"])
 
     def test_intervals_follow_leader_score_on_deciding_map(self):
         # 决胜图期间检查间隔有上限：没到 mid_at 最多 3 分钟，之后最多 2 分钟（空闲 10 分钟会跳过开录点）

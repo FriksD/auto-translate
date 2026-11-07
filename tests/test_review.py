@@ -198,7 +198,7 @@ class ReviewApiTest(unittest.TestCase):
 
         directory = config.task_dir(self.task["id"])
         package.save(self.task["id"], {"status": "done", "titles": ["A赛后采访：甲", "A赛后采访：乙"], "title": "A赛后采访：乙",
-                                       "summary": "IEM北京站今日继续，TYLOO以2-0击败9z（听译，可能存在出入）。",
+                                       "summary": "IEM北京站今日继续，TYLOO以2-0击败9z。（听译，可能存在出入）",
                                        "covers": [{"file": "c1.jpg", "source": "still", "label": ""}]})
         settings = db.get_settings()
         settings["feishu"]["enabled"] = True
@@ -212,7 +212,7 @@ class ReviewApiTest(unittest.TestCase):
         # 摘要不再单独发，而是 Word 里的导语
         self.assertFalse(any(item[0] == "text" and "TYLOO" in item[1] for item in sent))
         docx = Document(str(next(directory.glob("*.docx"))))
-        self.assertEqual(docx.paragraphs[0].text, "IEM北京站今日继续，TYLOO以2-0击败9z（听译，可能存在出入）。")
+        self.assertEqual(docx.paragraphs[0].text, "IEM北京站今日继续，TYLOO以2-0击败9z。（听译，可能存在出入）")
         self.assertFalse(docx.paragraphs[0].runs[0].bold)
 
     def test_payload_split_answer_stays_aligned(self):
