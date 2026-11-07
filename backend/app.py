@@ -25,17 +25,14 @@ from .integrations import feishu, schedule_card, task_cards
 from .integrations.feishu_ws import FeishuEventClient
 from .integrations.monitor_cards import PLATFORM_LABELS, monitor_cards, replace_stream
 from .integrations.task_cards import cards
-from .pipeline import identify, live, match_sources, monitor, package, stages
-from .pipeline.watcher import MatchWatcher
+from .pipeline import identify, live, monitor, package, stages
 from .runner import STAGES, STAGE_KEYS, PipelineRunner, State
-from .sources import bo3, hltv_parse, stream_status
+from .sources import hltv_parse, stream_status
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 runner = PipelineRunner()
-watcher = MatchWatcher(stages.hltv, live.manager, runner)
-LIVE_TASK_STATES = (State.RESERVED, State.WATCHING, State.RECORDING, State.INTERVIEW_DETECTING, State.NO_INTERVIEW)
 
 
 async def _notify_failure(task_id: int, message: str) -> None:
@@ -73,11 +70,8 @@ async def lifespan(_: FastAPI):
                 db.add_event(task_id, f"无法开始后处理：{error}", level="error")
         loop.call_soon_threadsafe(enqueue)
 
-    live.manager.bind(enqueue_threadsafe)
-    await run_in_threadpool(live.manager.resume_all)
     monitor.manager.bind(enqueue_threadsafe)
     monitor.manager.start()
-    watcher.start()
     global _main_loop
     _main_loop = loop
     cards.start()
@@ -87,9 +81,7 @@ async def lifespan(_: FastAPI):
     yield
     cards.stop()
     monitor_cards.stop()
-    await watcher.stop()
     await runner.stop()
-    await run_in_threadpool(live.manager.stop_all)
     await run_in_threadpool(monitor.manager.stop_all)
     await stages.browser.close()
 
@@ -311,7 +303,6 @@ async def delete_task(task_id: int):
     task = _require_task(task_id)
     if task["state"] in (State.QUEUED, State.PROCESSING):
         raise HTTPException(409, "任务正在处理中，请先取消")
-    await run_in_threadpool(live.manager.stop, task_id)
     db.delete_task(task_id)
     shutil.rmtree(config.TASKS_DIR / str(task_id), ignore_errors=True)
     stages.progress.pop(task_id, None)
@@ -323,8 +314,6 @@ async def upload_source(task_id: int, file: UploadFile = File(...)):
     task = _require_task(task_id)
     if task["state"] in (State.QUEUED, State.PROCESSING):
         raise HTTPException(409, "任务正在处理中")
-    # 直播任务改为人工上传音频时，停止监视和录制
-    await run_in_threadpool(live.manager.stop, task_id, "改为上传音频")
     suffix = Path(file.filename or "").suffix or ".bin"
     directory = config.task_dir(task_id)
     for old in directory.glob("source.*"):
@@ -351,14 +340,6 @@ async def run_task(task_id: int, body: RunRequest):
 @app.post("/api/tasks/{task_id}/cancel")
 async def cancel_task(task_id: int):
     task = _require_task(task_id)
-    if task["state"] in LIVE_TASK_STATES:
-        # 取消预约 / 停止监视和录制
-        await run_in_threadpool(live.manager.stop, task_id, "已取消")
-        if task["match_hltv_id"]:
-            await stages.hltv.unwatch_match(int(task["match_hltv_id"]))
-        db.update_task(task_id, state=State.CANCELLED)
-        db.add_event(task_id, "已取消", level="warning")
-        return db.get_task(task_id)
     if task["state"] not in (State.QUEUED, State.PROCESSING):
         raise HTTPException(400, "任务不在处理中")
     db.update_task(task_id, cancel_requested=True)
@@ -393,138 +374,15 @@ async def download_file(task_id: int, name: str):
     return FileResponse(path, filename=path.name)
 
 
-# ── 直播：监视、录制、采访截取 ────────────────────────────────────────────────
-
-class StreamRequest(BaseModel):
-    url: Optional[str] = None
-    name: Optional[str] = None
-    provider: Optional[str] = None
-
-
-class CaptureRequest(BaseModel):
-    start: float
-    end: float
-
-
-def _require_live(task_id: int) -> Dict[str, Any]:
-    task = _require_task(task_id)
-    if task["source_type"] != "live":
-        raise HTTPException(400, "不是直播任务")
-    return task
-
-
-class SourceRequest(BaseModel):
-    # bo3.gg 比赛链接或 slug；留空表示重新自动匹配
-    bo3: str = ""
-
+# ── 直播间截下来的采访 ──────────────────────────────────────────────────────
 
 @app.get("/api/tasks/{task_id}/live")
 async def live_status(task_id: int):
-    task = _require_live(task_id)
-    status = await run_in_threadpool(live.manager.status, task_id)
-    status["streams"] = await run_in_threadpool(live.candidate_streams, task, status)
-    return status
-
-
-@app.put("/api/tasks/{task_id}/live/source")
-async def live_set_source(task_id: int, body: SourceRequest):
-    """手动指定 bo3.gg 上对应的比赛（自动按队名匹配失败时）。"""
-    task = _require_live(task_id)
-    slug = body.bo3.strip().rstrip("/").rsplit("/", 1)[-1]
-    if not slug:
-        match_sources.set_source_id(task_id, "bo3", None)
-    else:
-        client = bo3.Bo3Client(config.proxy_or_none(db.get_settings()))
-        try:
-            match = await client.get_match(slug)
-        except Exception as error:
-            raise HTTPException(400, f"读取 bo3.gg 比赛失败：{error}")
-        swapped = bo3.same_team(task["team1"] or "", [match["team2"]["name"]])
-        match_sources.set_source_id(task_id, "bo3", {"slug": slug, "swapped": swapped})
-        db.add_event(task_id, f"已手动关联 bo3.gg 比赛：{slug}")
-    watcher.check_soon(task_id)
-    return {"ok": True}
-
-
-@app.post("/api/tasks/{task_id}/live/match-over")
-async def live_match_over(task_id: int):
-    """人工确认比赛已结束（比分数据源不可用时），开始按赛后流程监听采访。"""
-    task = _require_live(task_id)
-    if live.load_state(task_id).get("match_over_at"):
-        raise HTTPException(409, "已经记录为比赛结束")
-    if task["state"] not in (State.WATCHING, State.RECORDING):
-        raise HTTPException(409, "只有监视中或录制中的任务可以标记比赛结束")
-    await watcher.mark_over(task_id)
-    return db.get_task(task_id)
-
-
-@app.post("/api/tasks/{task_id}/live/check")
-async def live_check(task_id: int):
-    _require_live(task_id)
-    watcher.check_soon(task_id)
-    return {"ok": True}
-
-
-@app.post("/api/tasks/{task_id}/live/record")
-async def live_record(task_id: int, body: StreamRequest):
-    """立即开始录制，或切换直播源（不填 url 时自动选官方流）。"""
-    task = _require_live(task_id)
-    if task["state"] in (State.QUEUED, State.PROCESSING):
-        raise HTTPException(409, "任务正在处理中")
-    stream = body.model_dump() if body.url else None
-    if stream is None:
-        state = live.load_state(task_id)
-        stream = state.get("stream") or live.pick_stream(live.candidate_streams(task, state))
-    if not stream or not stream.get("url"):
-        raise HTTPException(400, "没有找到官方直播源，请填写直播链接")
-    try:
-        await run_in_threadpool(live.manager.start, task_id, stream)
-    except RuntimeError as error:
-        raise HTTPException(400, str(error))
-    if task["state"] in (State.RESERVED, State.WATCHING):
-        db.update_task(task_id, state=State.RECORDING)
-    elif task["state"] not in (State.RECORDING, State.INTERVIEW_DETECTING):
-        # 已判定无采访、或已截取过，又重新录：直接进入采访监听
-        live.manager.mark_match_over(task_id)
-        db.update_task(task_id, state=State.INTERVIEW_DETECTING)
-    return await run_in_threadpool(live.manager.status, task_id)
-
-
-@app.post("/api/tasks/{task_id}/live/capture")
-async def live_capture(task_id: int, body: CaptureRequest):
-    _require_live(task_id)
-    try:
-        await run_in_threadpool(live.manager.capture, task_id, body.start, body.end, "manual")
-    except (RuntimeError, ValueError) as error:
-        raise HTTPException(400, str(error))
-    return db.get_task(task_id)
-
-
-@app.post("/api/tasks/{task_id}/live/no-interview")
-async def live_no_interview(task_id: int):
-    _require_live(task_id)
-    await run_in_threadpool(live.manager.no_interview, task_id, live.MANUAL_NO_INTERVIEW)
-    return db.get_task(task_id)
-
-
-@app.get("/api/tasks/{task_id}/live/audio")
-async def live_audio(task_id: int, start: float, end: float):
-    """试听录音的某一段（相对录制开始的秒数，最长 10 分钟）。"""
-    _require_live(task_id)
-    state = live.load_state(task_id)
-    if not state.get("recording"):
-        raise HTTPException(404, "还没有录音")
-    end = min(end, start + 600)
-    chunks = sorted(live.manager.chunk_dir(task_id).glob("c_*.wav"))
-    if live.manager.is_recording(task_id):
-        chunks = chunks[:-1]
-    timeline = live.chunk_timeline(chunks, state["recording"]["started_at"])
-    buffer = io.BytesIO()
-    try:
-        await run_in_threadpool(live.cut_audio, timeline, start, end, buffer)
-    except ValueError as error:
-        raise HTTPException(400, str(error))
-    return Response(buffer.getvalue(), media_type="audio/wav")
+    """采访来自哪个直播间、什么时间（live.json），以及截取范围内的直播转写。"""
+    task = _require_task(task_id)
+    if task["source_type"] != "live":
+        raise HTTPException(400, "不是直播任务")
+    return {**live.load_state(task_id), "transcript": live.read_transcript(task_id)}
 
 
 # ── 直播间监视 ────────────────────────────────────────────────────────────────
@@ -670,73 +528,113 @@ async def list_matches(refresh: bool = False, days: int = 5):
     except Exception as error:
         raise HTTPException(502, f"抓取 HLTV 比赛列表失败：{error}")
     horizon = (time.time() + days * 86400) * 1000
+    monitors = db.list_monitors()
     result = []
     for match in matches:
         if match["unix_ms"] and match["unix_ms"] > horizon:
             continue
-        task = db.find_task_by_match(match["id"])
-        result.append({**match, "task_id": task["id"] if task else None, "task_state": task["state"] if task else None})
+        found = monitor.find_reservation(monitors, match["id"])
+        result.append({**match, "monitor_id": found[0]["id"] if found else None,
+                       "monitor_title": found[0]["title"] if found else None,
+                       "window": {"start": found[1]["start"], "end": found[1]["end"]} if found else None})
     return {"fetched_at": stages.hltv.cached_at("matches"), "matches": result}
 
 
-class ReserveRequest(BaseModel):
-    title: Optional[str] = None
-    notes: Optional[str] = None
-
-
 @app.post("/api/matches/{match_id}/reserve")
-async def reserve_match(match_id: int, body: ReserveRequest):
-    return await _reserve(match_id, body.title, body.notes)
+async def reserve_match(match_id: int):
+    return await _reserve(match_id)
 
 
-async def _reserve(match_id: int, title: Optional[str] = None, notes: Optional[str] = None,
-                   reserved_by: Optional[str] = None) -> Dict[str, Any]:
-    """预约比赛。reserved_by：在飞书里预约的人（open_id），显示在进度卡片上。"""
-    existing = db.find_task_by_match(match_id)
+@app.delete("/api/matches/{match_id}/reserve")
+async def unreserve_match(match_id: int):
+    return _unreserve(match_id)
+
+
+async def _reserve(match_id: int, reserved_by: Optional[str] = None) -> Dict[str, Any]:
+    """
+    预约比赛 = 给这场比赛所属赛事的直播间加一段时间窗（开赛前 15 分钟到开赛后 5 小时），时间窗里自动监视。
+    赛事还没有直播间就新建一个，链接先从 HLTV 比赛页找官方流（后台进行），在飞书直播间卡片下提醒确认。
+    预约不生成任务，任务只来自截到的采访。reserved_by：在飞书里预约的人（open_id）。
+    """
+    monitors = db.list_monitors()
+    existing = monitor.find_reservation(monitors, match_id)
     if existing:
-        raise HTTPException(409, f"这场比赛已经预约过（任务 #{existing['id']}）")
-    listed = next((m for m in (await stages.hltv.list_matches()) if m["id"] == match_id), None)
-    if not title:
-        if listed:
-            teams = " vs ".join(t["name"] or "TBD" for t in (listed["team1"], listed["team2"]))
-            title = f"{teams} · {listed['event']['name']}" if listed["event"]["name"] else teams
-        else:
-            title = f"HLTV 比赛 {match_id}"
-    task = db.create_task(
-        title=title,
-        state=State.RESERVED,
-        source_type="live",
-        match_hltv_id=str(match_id),
-        match_time=(listed["unix_ms"] / 1000) if listed and listed["unix_ms"] else None,
-        team1=(listed["team1"]["name"] or None) if listed else None,
-        team2=(listed["team2"]["name"] or None) if listed else None,
-        notes=notes,
-    )
-    db.add_event(task["id"], "已在飞书预约比赛" if reserved_by else "已预约比赛")
-    cards.track(task["id"], reserved_by)
-    # 立即抓取背景信息；只跑这一阶段，完成后回到「已预约」
-    runner.enqueue(task["id"], "context", "context")
-    return db.get_task(task["id"])
+        raise HTTPException(409, f"这场比赛已经预约过（直播间「{existing[0]['title']}」）")
+    try:
+        listed = next((m for m in (await stages.hltv.list_matches()) if m["id"] == match_id), None)
+    except Exception as error:
+        raise HTTPException(502, f"抓取 HLTV 比赛列表失败：{error}")
+    if listed is None:
+        raise HTTPException(404, "HLTV 赛程里找不到这场比赛")
+    event = listed.get("event") or {}
+    teams = " vs ".join(t["name"] or "TBD" for t in (listed["team1"], listed["team2"]))
+    now = time.time()
+    found = monitor.find_event_monitor(monitors, event.get("id"), event.get("name") or "")
+    created = found is None
+    if created:
+        found = db.create_monitor(title=event.get("name") or teams, event_id=str(event["id"]) if event.get("id") else None,
+                                  event_name=event.get("name") or None, streams=[])
+        db.add_monitor_event(found["id"], f"预约 {teams} 时新建直播间")
+    window = monitor.reservation_window(match_id, listed["unix_ms"] / 1000 if listed.get("unix_ms") else None, teams,
+                                        db.get_settings()["monitor"], now, reserved_by)
+    # 顺便清掉一天前就结束的时间窗
+    windows = [w for w in found["windows"] if float(w.get("end") or 0) > now - 86400] + [window]
+    updated = db.update_monitor(found["id"], windows=windows)
+    span = f"{_clock(window['start'], True)}–{_clock(window['end'])}"
+    db.add_monitor_event(found["id"], f"{'在飞书' if reserved_by else ''}预约 {teams}：{span} 自动监视")
+    monitor.manager.wake()
+    monitor_cards.wake()
+    if not updated["streams"]:
+        asyncio.create_task(_fill_official_stream(found["id"], match_id))
+    return {"title": teams, "monitor": updated, "window": window, "created": created,
+            "needs_stream": not updated["streams"]}
+
+
+def _unreserve(match_id: int) -> Dict[str, Any]:
+    found = monitor.find_reservation(db.list_monitors(), match_id)
+    if found is None:
+        raise HTTPException(404, "这场比赛没有预约")
+    owner, window = found
+    updated = db.update_monitor(owner["id"], windows=monitor.drop_reservation(owner["windows"], match_id))
+    db.add_monitor_event(owner["id"], f"取消预约 {window.get('title') or match_id}")
+    monitor.manager.wake()
+    monitor_cards.wake()
+    return {"title": window.get("title") or str(match_id), "monitor": updated}
+
+
+def _clock(ts: Optional[float], with_date: bool = False) -> str:
+    return time.strftime("%m-%d %H:%M" if with_date else "%H:%M", time.localtime(ts)) if ts else "?"
+
+
+async def _fill_official_stream(monitor_id: int, match_id: int) -> None:
+    """新建的直播间还没有链接：从 HLTV 比赛页找官方流填上，在飞书直播间卡片下提醒人确认（国内可换成 B 站）。"""
+    stream = None
+    try:
+        match = await stages.hltv.get_match(match_id)
+        stream = monitor.official_stream(match.get("streams") or [])
+    except Exception as error:
+        logger.warning("读取 HLTV 比赛 %s 的直播流失败：%s", match_id, error)
+    found = db.get_monitor(monitor_id)
+    if found is None or found["streams"]:
+        return
+    if stream:
+        db.update_monitor(monitor_id, streams=monitor.normalize_streams([{"url": stream["url"]}]))
+        db.add_monitor_event(monitor_id, f"从 HLTV 填上官方直播流：{stream.get('name') or ''} {stream['url']}")
+        text = (f"【请确认直播链接】已从 HLTV 填上官方直播流 {stream['url']}（走代理）。"
+                f"国内有 B 站等直播的话，请在卡片上换成国内链接，省代理流量")
+    else:
+        db.add_monitor_event(monitor_id, "HLTV 比赛页上没找到官方直播流", "warning")
+        text = "【请填直播链接】HLTV 上没找到这场比赛的官方直播流，请在卡片上填一个（国内可用 B 站）"
+    monitor.manager.wake()
+    await run_in_threadpool(monitor_cards.alert, monitor_id, text)
 
 
 # ── 飞书卡片按钮 ──────────────────────────────────────────────────────────────
 
-CARD_ACTIONS = {
-    "check": "立即检查", "record": "立即录制", "stream": "填写直播链接录制", "match_over": "比赛已结束",
-    "no_interview": "本场无采访", "cancel": "取消预约", "retry": "从失败处重试", "done": "标记完成",
-}
+CARD_ACTIONS = {"retry": "从失败处重试", "done": "标记完成"}
 # 飞书要求 3 秒内响应卡片回调，操作没做完就先回"已提交"
 CARD_ACTION_TIMEOUT = 2.5
 _main_loop: Optional[asyncio.AbstractEventLoop] = None
-
-
-def _stream_provider(url: str) -> Optional[str]:
-    host = url.lower()
-    for key, provider in (("twitch.tv", "twitch"), ("youtube.com", "youtube"), ("youtu.be", "youtube"),
-                          ("kick.com", "kick")):
-        if key in host:
-            return provider
-    return None
 
 
 def _aliases() -> Dict[str, str]:
@@ -761,17 +659,13 @@ async def _card_action(value: Dict[str, Any], form: Dict[str, Any], operator: st
         await _update_schedule(message_id, view, bool(value.get("refresh")))
         return None
     if action == "reserve":
-        task = await _reserve(int(value["match_id"]), reserved_by=operator or None)
+        result = await _reserve(int(value["match_id"]), reserved_by=operator or None)
         await _update_schedule(message_id, view)
-        return RESERVED_REPLY.format(title=task["title"])
+        return _reserved_reply(result)
     if action == "unreserve":
-        task = _require_task(int(value["task_id"]))
-        if task["state"] not in (State.RESERVED, State.WATCHING):
-            raise HTTPException(409, "已经开始录制，请在进度卡片上操作")
-        await cancel_task(task["id"])
-        db.add_event(task["id"], "在飞书赛程卡片上取消预约")
+        result = _unreserve(int(value["match_id"]))
         await _update_schedule(message_id, view)
-        return f"已取消预约 {task['title']}"
+        return f"已取消预约 {result['title']}"
     if action.startswith("monitor_"):
         return await _monitor_card_action(action, int(value["monitor_id"]), form)
     label = CARD_ACTIONS.get(action)
@@ -781,28 +675,7 @@ async def _card_action(value: Dict[str, Any], form: Dict[str, Any], operator: st
     if task_id == task_cards.DEMO_TASK_ID:
         return f"卡片按钮已连通（{label}）"
     task = _require_task(task_id)
-    if action == "check":
-        await live_check(task_id)
-        message = "已安排立即检查比分"
-    elif action == "record":
-        await live_record(task_id, StreamRequest())
-        message = "已开始录制"
-    elif action == "stream":
-        url = str(form.get("url") or "").strip()
-        if not url.startswith(("http://", "https://")):
-            raise HTTPException(400, "请填写直播链接")
-        await live_record(task_id, StreamRequest(url=url, provider=_stream_provider(url)))
-        message = "已用这个链接开始录制"
-    elif action == "match_over":
-        await live_match_over(task_id)
-        message = "已记录比赛结束，开始监听采访"
-    elif action == "no_interview":
-        await live_no_interview(task_id)
-        message = "已停止录制"
-    elif action == "cancel":
-        await cancel_task(task_id)
-        message = "已取消"
-    elif action == "retry":
+    if action == "retry":
         if task["state"] != State.FAILED:
             raise HTTPException(409, "任务不是失败状态")
         await run_task(task_id, RunRequest(from_stage=task["stage"] or STAGE_KEYS[0]))
@@ -878,7 +751,13 @@ def _on_card_action(value: Dict[str, Any], form: Dict[str, Any], operator: str, 
 
 # ── 飞书机器人命令（群里 @机器人 或私聊） ─────────────────────────────────────
 
-RESERVED_REPLY = "已预约 {title}，比赛开打后进度卡片会发到群里；在赛程卡片上可以取消预约"
+def _reserved_reply(result: Dict[str, Any]) -> str:
+    window = result["window"]
+    text = (f"已预约 {result['title']}：{_clock(window['start'], True)}–{_clock(window['end'])} "
+            f"自动监视直播间「{result['monitor']['title']}」，截到的采访会各自发进度卡片")
+    if result["needs_stream"]:
+        text += "；这个赛事还没有直播链接，正在从 HLTV 找官方流，结果发在直播间卡片下"
+    return text
 
 
 def _command_allowed(event: Dict[str, Any], feishu_settings: Dict[str, Any]) -> bool:
@@ -915,8 +794,7 @@ async def _handle_command(event: Dict[str, Any]) -> None:
             if not match_id:
                 await reply("无法从链接中识别 HLTV 比赛 ID")
                 return
-            task = await _reserve(match_id, reserved_by=event.get("sender") or None)
-            await reply(RESERVED_REPLY.format(title=task["title"]))
+            await reply(_reserved_reply(await _reserve(match_id, reserved_by=event.get("sender") or None)))
         else:
             card = await _schedule_card(args)
             await run_in_threadpool(client.reply_card, message_id, card)

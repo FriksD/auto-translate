@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, Download, Loader2, Play, Square, Trash2, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Download, Loader2, Play, Square, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge, Card, ErrorText, Select } from '@/components/ui/form'
 import { ContextEditor } from '@/components/task/ContextEditor'
 import { InterviewPanel } from '@/components/task/InterviewPanel'
-import { LivePanel } from '@/components/task/LivePanel'
 import { MatchCard } from '@/components/task/MatchCard'
 import { StageStepper } from '@/components/task/StageStepper'
 import { TaskInfoEditor } from '@/components/task/TaskInfoEditor'
 import { TextEditor } from '@/components/task/TextEditor'
-import { api, formatSeconds, formatTime, isLive, isRunning, StageMeta, STATE_COLORS, STATE_LABELS, TaskDetail } from '@/lib/api'
+import { api, formatSeconds, formatTime, isRunning, StageMeta, STATE_COLORS, STATE_LABELS, TaskDetail } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 const METHOD_LABELS: Record<string, string> = {
@@ -21,14 +20,6 @@ const METHOD_LABELS: Record<string, string> = {
   phonetic: '发音推断',
   skeleton: '发音推断',
   llm: '上下文推断',
-}
-
-const LIVE_HINTS: Record<string, string> = {
-  reserved: '已预约，开赛前 15 分钟开始自动监视比分。',
-  watching: '监视中：决胜图接近结束时自动开始录制官方直播。',
-  recording: '录制中：边录边转写，比赛结束后自动定位赛后采访。',
-  interview_detecting: '比赛已结束，正在监听赛后采访；采访结束后自动截取并开始翻译。',
-  no_interview: '未发现采访，录制已停止。如有采访，可在「直播」里手动标注起止，或在「任务信息」里上传音频。',
 }
 
 function NamesReportView({ task }: { task: TaskDetail }) {
@@ -172,7 +163,6 @@ export function TaskPage() {
 
   const progress = task.progress
   // 直播间监视截下来的采访：没有预约、比分、录制这些，「直播」标签只看采访来源和识别结果
-  const fromMonitor = !!task.context.monitor
   const saveText = (name: string) => async (text: string) => {
     await api.saveText(task.id, name, text)
     await load()
@@ -212,17 +202,6 @@ export function TaskPage() {
             <Button variant="outline" onClick={() => act(() => api.markDone(task.id))}>
               <CheckCircle2 className="mr-2 h-4 w-4" />
               标记完成
-            </Button>
-          )}
-          {isLive(task.state) && (
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (confirm('确定取消这场比赛？会停止监视和录制。')) act(() => api.cancelTask(task.id))
-              }}
-            >
-              <XCircle className="mr-2 h-4 w-4" />
-              {task.state === 'reserved' || task.state === 'watching' ? '取消预约' : '停止并取消'}
             </Button>
           )}
           {running ? (
@@ -277,9 +256,6 @@ export function TaskPage() {
             {task.error}
           </p>
         )}
-        {LIVE_HINTS[task.state] && task.source_type === 'live' && (
-          <p className="text-sm text-violet-700">{LIVE_HINTS[task.state]}</p>
-        )}
         {task.state === 'draft' && task.source_type === 'file' && !task.source_file && (
           <p className="text-sm text-amber-700">尚未上传音频，请在「任务信息」里上传。</p>
         )}
@@ -293,9 +269,9 @@ export function TaskPage() {
       <ErrorText>{error}</ErrorText>
 
       <Card>
-        <Tabs defaultValue={task.source_type === 'live' && isLive(task.state) ? 'live' : 'draft'}>
+        <Tabs defaultValue="draft">
           <TabsList className="mb-4 flex-wrap">
-            {task.source_type === 'live' && <TabsTrigger value="live">{fromMonitor ? '采访来源' : '直播'}</TabsTrigger>}
+            {task.source_type === 'live' && <TabsTrigger value="live">采访来源</TabsTrigger>}
             <TabsTrigger value="draft">中文稿</TabsTrigger>
             <TabsTrigger value="clean">英文清洗稿</TabsTrigger>
             <TabsTrigger value="transcript">转写原文</TabsTrigger>
@@ -306,7 +282,7 @@ export function TaskPage() {
           </TabsList>
           {task.source_type === 'live' && (
             <TabsContent value="live">
-              {fromMonitor ? <InterviewPanel task={task} /> : <LivePanel task={task} onChanged={load} />}
+              <InterviewPanel task={task} />
             </TabsContent>
           )}
           <TabsContent value="draft">

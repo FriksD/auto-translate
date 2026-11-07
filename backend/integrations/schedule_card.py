@@ -21,7 +21,7 @@ MAX_ROWS = 25
 
 HELP_TEXT = (
     "可以这样用（群里先 @我）：\n"
-    "· 赛程 —— 今天的比赛，卡片上可以切换日期、星级，点「预约」\n"
+    "· 赛程 —— 今天的比赛，卡片上可以切换日期、星级，点「预约」= 开赛前 15 分钟起自动监视这个赛事的直播间\n"
     "· 赛程 明天 / 赛程 全部 / 赛程 2星\n"
     "· 预约 vitality —— 按队名或赛事名搜索未来几天的比赛（支持术语表里的别名，如 小蜜蜂）\n"
     "· 预约 <HLTV 比赛链接> —— 直接预约\n"
@@ -165,12 +165,11 @@ def _match_row(match: Dict[str, Any], view: Dict[str, Any], show_date: bool) -> 
     event = (match.get("event") or {}).get("name") or ""
     detail = " · ".join(p for p in (event, (match.get("format") or "").upper()) if p)
     left = {"tag": "markdown", "content": f"`{when}` **{_match_teams(match)}** {stars}\n<font color='grey'>{detail}</font>"}
-    if match.get("task_id") and match.get("task_state") in ("reserved", "watching"):
-        # 开打前没有进度卡片，取消预约在这里
-        right = _button("取消预约", {"action": "unreserve", "task_id": match["task_id"], "view": view}, "danger")
-        right["confirm"] = {"title": _text("取消预约？"), "text": _text(f"{_match_teams(match)} 将不再监视和录制")}
-    elif match.get("task_id"):
-        right = {"tag": "markdown", "content": "✅ 已预约", "text_align": "right"}
+    if match.get("window"):
+        right = _button("取消预约", {"action": "unreserve", "match_id": match["id"], "view": view}, "danger")
+        right["confirm"] = {"title": _text("取消预约？"), "text": _text(
+            f"删掉直播间「{match.get('monitor_title') or ''}」为 {_match_teams(match)} 加的监视时间段")}
+        left["content"] += f" <font color='green'>已预约 · {match.get('monitor_title') or '直播间'}</font>"
     else:
         right = _button("预约", {"action": "reserve", "match_id": match["id"], "view": view}, "primary")
     return {
@@ -185,7 +184,7 @@ def _match_row(match: Dict[str, Any], view: Dict[str, Any], show_date: bool) -> 
 
 def build_schedule_card(matches: List[Dict[str, Any]], view: Dict[str, Any], aliases: Dict[str, str],
                         fetched_at: Optional[float] = None, now: Optional[float] = None) -> Dict[str, Any]:
-    """matches：/api/matches 的结果（含 task_id）；view：{day, stars, q}。"""
+    """matches：/api/matches 的结果（含预约的直播间和时间窗）；view：{day, stars, q}。"""
     now = now or time.time()
     dates = sorted({_date_key(m["unix_ms"] / 1000) for m in matches if m.get("unix_ms")})
     day = resolve_day(view, dates, now)

@@ -120,7 +120,7 @@ class InterviewTaskCardTest(unittest.TestCase):
         self.assertEqual(callbacks(review), ["done"])
         failed = task_cards.step_track(self._task(State.FAILED), state)
         self.assertEqual(failed[1], ("初稿", "failed"))
-        self.assertTrue(task_cards.ready_to_send(self._task(State.DRAFT)))
+        
 
 
 class ServiceAndActionTest(unittest.TestCase):
@@ -191,6 +191,52 @@ class ServiceAndActionTest(unittest.TestCase):
             self.assertFalse(db.get_monitor(found["id"])["enabled"])
             self.assertIn("已把 2 个直播间的卡片", run(app._send_monitor_cards()))
         self.assertTrue(all(call.args[1] is True for call in sync.call_args_list))
+
+
+
+class ReservationTest(unittest.TestCase):
+    def test_window_and_lookup(self):
+        cfg = {"pre_match_minutes": 15, "window_hours": 5}
+        window = monitor.reservation_window(7, 10_000.0, "A vs B", cfg, now=5_000.0, reserved_by="ou_1")
+        self.assertEqual((window["start"], window["end"]), (10_000 - 900, 10_000 + 5 * 3600))
+        unknown = monitor.reservation_window(8, None, "C vs D", cfg, now=5_000.0)
+        self.assertEqual((unknown["start"], unknown["end"]), (5_000.0, 5_000 + 5 * 3600))
+        monitors = [{"id": 1, "title": "IEM 北京", "event_id": "8000", "event_name": "IEM Beijing 2026", "windows": [window]},
+                    {"id": 2, "title": "BLAST", "event_id": None, "event_name": "BLAST Rivals Fall 2026", "windows": []}]
+        self.assertEqual(monitor.find_reservation(monitors, 7)[0]["id"], 1)
+        self.assertIsNone(monitor.find_reservation(monitors, 9))
+        self.assertEqual(monitor.find_event_monitor(monitors, 8000, "whatever")["id"], 1)
+        self.assertEqual(monitor.find_event_monitor(monitors, 1, "Intel Extreme Masters Beijing 2026")["id"], 1)
+        self.assertEqual(monitor.find_event_monitor(monitors, None, "blast rivals fall 2026")["id"], 2)
+        self.assertIsNone(monitor.find_event_monitor(monitors, None, "PGL Masters"))
+        self.assertEqual(monitor.drop_reservation([window, unknown], 7), [unknown])
+        # 窗口内就算开着
+        self.assertTrue(monitor.is_on({"enabled": False, "windows": [window]}, 10_000.0))
+        self.assertFalse(monitor.is_on({"enabled": False, "windows": [window]}, 1_000.0))
+
+    def test_official_stream(self):
+        streams = [{"url": "https://twitch.tv/es_cs", "provider": "twitch", "country": "Spain", "viewers": 9000},
+                   {"url": "https://www.youtube.com/watch?v=x", "provider": "youtube", "country": "Other", "viewers": 1},
+                   {"url": "https://www.youtube.com/@ESLCS", "provider": "youtube", "country": "Other", "viewers": 1},
+                   {"url": "https://twitch.tv/eslcs", "provider": "twitch", "country": "Other", "viewers": 5}]
+        self.assertEqual(monitor.official_stream(streams)["url"], "https://twitch.tv/eslcs")
+        self.assertEqual(monitor.official_stream(streams[1:3])["url"], "https://www.youtube.com/@ESLCS")
+        self.assertIsNone(monitor.official_stream([{"url": "x", "provider": "afreeca"}]))
+
+
+class MigrationTest(unittest.TestCase):
+    def test_retired_states_become_cancelled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config.use_data_dir(Path(tmp))
+            db.init_db()
+            old = db.create_task(title="old", state="recording", source_type="live")
+            kept = db.create_task(title="kept", state=State.REVIEW, source_type="live")
+            db._conn.close()
+            db.init_db()
+            self.assertEqual(db.get_task(old["id"])["state"], State.CANCELLED)
+            self.assertEqual(db.get_task(kept["id"])["state"], State.REVIEW)
+            self.assertIn("直播间监视", db.list_events(old["id"])[-1]["message"])
+            db._conn.close()
 
 
 if __name__ == "__main__":

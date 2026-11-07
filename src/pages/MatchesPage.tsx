@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { CalendarCheck, ExternalLink, Loader2, RefreshCw, Star } from 'lucide-react'
+import { ExternalLink, Loader2, Radio, RefreshCw, Star, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge, Card, ErrorText, Select } from '@/components/ui/form'
@@ -22,7 +22,19 @@ function Stars({ count }: { count: number }) {
   )
 }
 
-function MatchRow({ match, onReserve }: { match: HltvMatch; onReserve: (m: HltvMatch) => Promise<void> }) {
+function clock(ts: number) {
+  return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+function MatchRow({
+  match,
+  onReserve,
+  onUnreserve,
+}: {
+  match: HltvMatch
+  onReserve: (m: HltvMatch) => Promise<void>
+  onUnreserve: (m: HltvMatch) => Promise<void>
+}) {
   const [busy, setBusy] = useState(false)
   const time = match.live
     ? null
@@ -49,20 +61,39 @@ function MatchRow({ match, onReserve }: { match: HltvMatch; onReserve: (m: HltvM
         {match.stage && <span className="ml-2 text-xs">· {match.stage}</span>}
       </td>
       <td className="w-12 px-2 py-2.5 text-sm uppercase text-muted-foreground">{match.format}</td>
-      <td className="w-36 px-4 py-2.5 text-right">
+      <td className="w-64 px-4 py-2.5 text-right">
         <div className="flex items-center justify-end gap-1">
           <a href={match.url} target="_blank" rel="noreferrer" title="在 HLTV 打开">
             <Button variant="ghost" size="icon" className="h-8 w-8">
               <ExternalLink className="h-4 w-4" />
             </Button>
           </a>
-          {match.task_id ? (
-            <Link to={`/tasks/${match.task_id}`}>
-              <Button size="sm" variant="secondary" className="h-8">
-                <CalendarCheck className="mr-1.5 h-4 w-4" />
-                已预约
+          {match.window && match.monitor_id ? (
+            <>
+              <Link to={`/monitors/${match.monitor_id}`} title={`${clock(match.window.start)}–${clock(match.window.end)} 自动监视`}>
+                <Button size="sm" variant="secondary" className="h-8">
+                  <Radio className="mr-1.5 h-4 w-4" />
+                  已预约 · {match.monitor_title}
+                </Button>
+              </Link>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="取消预约"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    await onUnreserve(match)
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+              >
+                <X className="h-4 w-4" />
               </Button>
-            </Link>
+            </>
           ) : (
             <Button
               size="sm"
@@ -96,6 +127,7 @@ export function MatchesPage() {
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [minStars, setMinStars] = useState(0)
+  const [notice, setNotice] = useState('')
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true)
@@ -134,8 +166,28 @@ export function MatchesPage() {
 
   const reserve = async (match: HltvMatch) => {
     try {
-      const task = await api.reserveMatch(match.id)
-      setMatches((list) => list.map((m) => (m.id === match.id ? { ...m, task_id: task.id } : m)))
+      const result = await api.reserveMatch(match.id)
+      setMatches((list) =>
+        list.map((m) =>
+          m.id === match.id
+            ? { ...m, monitor_id: result.monitor.id, monitor_title: result.monitor.title, window: result.window }
+            : m,
+        ),
+      )
+      setNotice(
+        result.needs_stream
+          ? `已预约。直播间「${result.monitor.title}」还没有直播链接，正在从 HLTV 找官方流，请到直播间页确认或换成 B 站链接`
+          : '',
+      )
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  const unreserve = async (match: HltvMatch) => {
+    try {
+      await api.unreserveMatch(match.id)
+      setMatches((list) => list.map((m) => (m.id === match.id ? { ...m, monitor_id: null, monitor_title: null, window: null } : m)))
     } catch (e) {
       setError((e as Error).message)
     }
@@ -147,7 +199,8 @@ export function MatchesPage() {
         <div>
           <h1 className="text-xl font-semibold">比赛</h1>
           <p className="text-sm text-muted-foreground">
-            HLTV 未来 5 天的比赛{fetchedAt ? `，更新于 ${formatTime(fetchedAt)}` : ''}。预约后会立即抓取比赛背景信息。
+            HLTV 未来 5 天的比赛{fetchedAt ? `，更新于 ${formatTime(fetchedAt)}` : ''}。
+            预约 = 开赛前 15 分钟起自动监视这个赛事的直播间（没有就新建），截到的采访各自生成任务。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -168,6 +221,7 @@ export function MatchesPage() {
       </div>
 
       <ErrorText>{error}</ErrorText>
+      {notice && <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{notice}</p>}
       {loading && matches.length === 0 && (
         <p className="py-12 text-center text-sm text-muted-foreground">
           <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
@@ -181,7 +235,7 @@ export function MatchesPage() {
           <table className="w-full">
             <tbody>
               {group.items.map((match) => (
-                <MatchRow key={match.id} match={match} onReserve={reserve} />
+                <MatchRow key={match.id} match={match} onReserve={reserve} onUnreserve={unreserve} />
               ))}
             </tbody>
           </table>
@@ -191,7 +245,7 @@ export function MatchesPage() {
         <p className="py-12 text-center text-sm text-muted-foreground">没有符合条件的比赛</p>
       )}
       <p className="text-xs text-muted-foreground">
-        已预约的比赛可以在<button className="underline" onClick={() => navigate('/')}>任务</button>页查看。
+        预约后的监视状态和截到的采访在<button className="underline" onClick={() => navigate('/monitors')}>直播间</button>页查看。
       </p>
     </div>
   )

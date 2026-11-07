@@ -57,42 +57,25 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         "temperature": 0.3,
         "extra_instructions": "",
     },
+    # 直播录制和采访定位（直播间监视用）
     "live": {
-        # 比分数据源的尝试顺序，前一个失败自动用下一个：bo3（bo3.gg 公开接口）、hltv（浏览器访问 HLTV）
-        "sources": ["bo3", "hltv"],
-        # 开赛前多少分钟开始监视
-        "pre_match_minutes": 15,
-        # 没有地图在打（赛前、图间）时也录制：这时才可能有选手采访，地图进行中不录。决胜图收尾的录制不受影响
-        "record_off_map": True,
-        # 轮询间隔（秒）：非决胜图 / 决胜图领先方 < mid_at；领先方达到 mid_at；达到 late_at 或加时；录制中
-        "intervals": {"idle": 600, "mid": 300, "late": 120, "recording": 60},
-        "mid_at": 8,
-        "late_at": 11,
-        # 决胜图领先方回合数达到多少开始录制（HLTV 比分通常比直播画面快 1～3 分钟）；
-        "record_at": 10,
-        # 决胜图没有回合比分时（bo3.gg 普通比赛，且 HLTV 比分板也读不到）：决胜图开打多少分钟后开始录制。
-        # 一张图最快（13:0）也要 20 分钟以上，采访在比赛结束后才开始
-        "no_score_record_minutes": 15,
         # 录音分段时长（秒）：越短，采访结束后越快被发现
         "chunk_seconds": 30,
         # 每隔多少秒存一帧画面，交给采访定位那一步的模型按镜头判断采访起止；0 = 只录音
         "frame_interval": 5,
         # 录制期间每隔多少秒让 LLM 判断一次采访起止（有新转写时才判断）
         "detect_interval": 30,
-        # 比赛结束后多久还没发现采访就提醒（分钟）
-        "alert_no_interview_minutes": 10,
-        # 比赛结束后多久仍未发现采访就判定为无采访（分钟）
-        "max_post_match_minutes": 20,
         # 采访开始后多久仍未判定结束就直接截取（分钟）
         "max_interview_minutes": 10,
         # 截取采访时前后各留的余量（秒）
         "padding_seconds": 10,
-        # 采访结束后多久还没出初稿就提醒（分钟）
-        "draft_deadline_minutes": 15,
     },
     # 直播间监视：一直录、一直转写和识别画面，发现采访就截下来生成任务。
     # 分段时长、抽帧间隔、判断间隔、采访最长时长、截取余量沿用上面 live 里的设置
     "monitor": {
+        # 预约比赛 = 给赛事的直播间加一段时间窗：开赛前多少分钟开始、开赛后监视多少小时
+        "pre_match_minutes": 15,
+        "window_hours": 5,
         # 未开播时多久探测一次是否开播（秒）
         "offline_poll_seconds": 60,
         # 录制中多久确认一次还在播（秒；B 站查房间接口，其他平台断流时才探测）

@@ -1,5 +1,4 @@
-"""比赛监视（决胜图判断、轮询间隔、数据源）、直播源选择、录音时间轴与采访截取的测试。"""
-import asyncio
+"""直播录制公用部分的测试：HLTV / bo3.gg 解析、录音时间轴与截取、镜头时间轴、断流提醒。"""
 import json
 import sys
 import tempfile
@@ -11,8 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.config import DEFAULT_SETTINGS
-from backend.pipeline import live, match_sources, watcher
+from backend.pipeline import live, monitor
 from backend.pipeline.recorder import SAMPLE_RATE, chunk_start
 from backend.sources import bo3
 from backend.sources import hltv_parse as P
@@ -20,7 +18,6 @@ from backend.sources.browser import is_challenge, is_hltv_page
 
 FIXTURES = Path(__file__).parent / "fixtures" / "hltv"
 BO3_FIXTURES = Path(__file__).parent / "fixtures" / "bo3"
-CFG = DEFAULT_SETTINGS["live"]
 
 
 def fixture(name: str) -> str:
@@ -29,21 +26,6 @@ def fixture(name: str) -> str:
 
 def bo3_fixture(name: str):
     return json.loads((BO3_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
-
-
-def make_match(status="live", best_of=3, finished=(), live_score=None, board_map="Mirage"):
-    """finished: 已打完各图的胜方 (1/2)；live_score: 当前图 (team1, team2) 比分（来自实时比分板）"""
-    maps = [{"name": f"Map{i}", "team1_score": 13, "team2_score": 5, "status": "finished", "winner": w}
-            for i, w in enumerate(finished)]
-    board = None
-    if live_score is not None:
-        maps.append({"name": board_map, "team1_score": None, "team2_score": None, "status": "live", "winner": None})
-        # 比分板按 CT / T 两边显示，和 team1 / team2 的顺序无关
-        board = {"round": sum(live_score) + 1, "map": board_map,
-                 "ct": {"team": "MIBR", "score": live_score[1]}, "t": {"team": "fnatic", "score": live_score[0]}}
-    return {"status": status, "best_of": best_of, "maps": maps, "scoreboard": board,
-            "team1": {"name": "fnatic"}, "team2": {"name": "MIBR"}, "loaded_at": time.time()}
-
 
 class ParseLiveTest(unittest.TestCase):
     def test_live_page_has_scoreboard_and_map_status(self):
@@ -82,104 +64,13 @@ class ChallengeTest(unittest.TestCase):
             self.assertFalse(is_challenge("HLTV.org", fixture(name)), name)
         self.assertTrue(is_hltv_page('<!DOCTYPE html><html lang="en" data-client-country-iso="SG">'))
 
-
-class AssessTest(unittest.TestCase):
-    def test_scoreboard_sides_are_mapped_to_teams(self):
-        score = match_sources.live_map_score(make_match(live_score=(9, 4)))
-        self.assertEqual((score["team1"], score["team2"], score["source"]), (9, 4, "scoreboard"))
-
-    def test_first_map_of_bo3_is_not_deciding(self):
-        result = watcher.assess(make_match(live_score=(12, 3)), CFG)
-        self.assertFalse(result["deciding"])
-        self.assertFalse(result["should_record"])
-        # 非决胜图打到 12:3：马上就是图间，检查加密到 late 间隔
-        self.assertEqual(result["interval"], CFG["intervals"]["late"])
-        self.assertEqual(watcher.assess(make_match(live_score=(3, 2)), CFG)["interval"], CFG["intervals"]["idle"])
-
-    def test_off_map_windows_are_recorded(self):
-        # 地图正在打：不录
-        playing = watcher.assess(make_match(live_score=(3, 2)), CFG)
-        self.assertTrue(playing["map_in_play"])
-        self.assertFalse(playing["off_map"])
-        # 开赛前（还没有地图）、图间（上一张打完下一张还没开）：录，并且按录制间隔检查
-        for match in (make_match(status="upcoming"), make_match(finished=(1,)), make_match(finished=(1, 2))):
-            result = watcher.assess(match, CFG)
-            self.assertTrue(result["off_map"])
-            self.assertFalse(result["should_record"])
-            self.assertEqual(result["interval"], CFG["intervals"]["recording"])
-        # 比赛结束走原来的逻辑，不算图间
-        self.assertFalse(watcher.assess(make_match(status="over", finished=(1, 1)), CFG)["off_map"])
-        # 关掉开关
-        self.assertFalse(watcher.assess(make_match(status="upcoming"), {**CFG, "record_off_map": False})["off_map"])
-
-    def test_intervals_follow_leader_score_on_deciding_map(self):
-        # 决胜图期间检查间隔有上限：没到 mid_at 最多 3 分钟，之后最多 2 分钟（空闲 10 分钟会跳过开录点）
-        cases = [((5, 3), watcher.DECIDING_SLOW_CAP, False), ((8, 6), watcher.DECIDING_FAST_CAP, False),
-                 ((10, 4), watcher.DECIDING_FAST_CAP, True), ((11, 9), CFG["intervals"]["late"], True),
-                 ((12, 12), CFG["intervals"]["late"], True)]
-        for score, interval, record in cases:
-            result = watcher.assess(make_match(finished=(1,), live_score=score), CFG)
-            self.assertTrue(result["deciding"])
-            self.assertEqual(result["interval"], interval, score)
-            self.assertEqual(result["should_record"], record, score)
-        self.assertTrue(watcher.assess(make_match(finished=(1,), live_score=(12, 12)), CFG)["overtime"])
-
-    def test_bo1_and_bo5(self):
-        self.assertTrue(watcher.assess(make_match(best_of=1, live_score=(10, 2)), CFG)["should_record"])
-        self.assertFalse(watcher.assess(make_match(best_of=5, finished=(1, 2), live_score=(10, 2)), CFG)["deciding"])
-        self.assertTrue(watcher.assess(make_match(best_of=5, finished=(1, 2, 1), live_score=(10, 2)), CFG)["should_record"])
-        # BO5 2:1，落后方在第四张图领先：打完是 2:2，不录
-        self.assertFalse(watcher.assess(make_match(best_of=5, finished=(1, 2, 1), live_score=(2, 10)), CFG)["should_record"])
-        self.assertTrue(watcher.assess(make_match(best_of=5, finished=(1, 2, 1, 2), live_score=(2, 10)), CFG)["should_record"])
-
-    def test_bo3_one_nil_only_counts_match_point_side(self):
-        # 实测：BO3 1:0 时第二张图落后方先到 10 分就开录了，结果打成 1:1，提前录了一整张图
-        trailing = watcher.assess(make_match(finished=(1,), live_score=(4, 11)), CFG)
-        self.assertTrue(trailing["deciding"])
-        self.assertFalse(trailing["should_record"])
-        self.assertEqual(trailing["interval"], watcher.DECIDING_SLOW_CAP)
-        self.assertTrue(watcher.assess(make_match(finished=(1,), live_score=(11, 4)), CFG)["should_record"])
-        self.assertTrue(watcher.assess(make_match(finished=(1,), live_score=(4, 12)), CFG)["should_record"] is False)
-        self.assertTrue(watcher.assess(make_match(finished=(1,), live_score=(12, 12)), CFG)["should_record"])  # 加时
-        # 1:1 第三张图：两边都是赛点
-        self.assertTrue(watcher.assess(make_match(finished=(1, 2), live_score=(3, 10)), CFG)["should_record"])
-
-    def test_recording_pauses_when_series_continues(self):
-        assessment = watcher.assess(make_match(finished=(1, 2), live_score=(1, 0)), CFG, recording=True)
-        self.assertTrue(watcher.series_continued([1, 0], assessment))   # 开录时 1:0，现在 1:1
-        self.assertFalse(watcher.series_continued([1, 1], assessment))  # 还在开录时那张图
-        self.assertFalse(watcher.series_continued(None, assessment))    # 人工开录
-        over = watcher.assess(make_match(status="over", finished=(1, 1)), CFG, recording=True)
-        self.assertFalse(watcher.series_continued([1, 0], over))        # 系列赛结束了，正常走赛后流程
-
-    def test_match_over_and_recording(self):
-        self.assertTrue(watcher.assess(make_match(status="over", finished=(1, 1)), CFG)["should_record"])
-        # 对手投降：HLTV 还显示 LIVE，但已经 2:0
-        surrendered = watcher.assess(make_match(status="live", finished=(1, 1)), CFG)
-        self.assertEqual((surrendered["status"], surrendered["should_record"]), ("over", True))
-        recording = watcher.assess(make_match(finished=(1,), live_score=(11, 3)), CFG, recording=True)
-        self.assertEqual(recording["interval"], CFG["intervals"]["recording"])
-
-    def test_reload_rules(self):
-        now = time.time() + 120
-        self.assertFalse(match_sources.needs_reload(make_match(status="upcoming"), now - 120))  # 刚加载过
-        self.assertFalse(match_sources.needs_reload(make_match(finished=(1,), live_score=(5, 3)), now))
-        self.assertTrue(match_sources.needs_reload(make_match(finished=(1,), live_score=(13, 9)), now))
-        self.assertTrue(match_sources.needs_reload(make_match(finished=(1,), live_score=(5, 3)), now + 3600))
-        self.assertTrue(match_sources.needs_reload(make_match(status="upcoming"), now))
-        switched = make_match(finished=(1,), live_score=(1, 0), board_map="Anubis")
-        switched["maps"][-1]["name"] = "Mirage"
-        self.assertTrue(match_sources.needs_reload(switched, now))
-
-
 class Bo3Test(unittest.TestCase):
     def test_finished_match(self):
         match = bo3.normalize_match(bo3_fixture("match_over"))
         self.assertEqual((match["status"], match["best_of"], match["team1"]["name"]), ("over", 3, "fnatic"))
         self.assertEqual([(m["name"], m["status"], m["winner"], m["team1_score"], m["team2_score"]) for m in match["maps"]],
                          [("Ancient", "finished", 1, 13, 9), ("Mirage", "finished", 1, 13, 7)])
-        self.assertTrue(watcher.assess(match, CFG)["should_record"])
-        official = live.pick_stream(match["streams"])
+        official = monitor.official_stream(match["streams"])
         self.assertEqual((official["url"], official["country"]), ("https://kick.com/starladder", "Other"))
 
     def test_swapped_order_and_three_maps(self):
@@ -188,137 +79,6 @@ class Bo3Test(unittest.TestCase):
         self.assertEqual([m["winner"] for m in match["maps"]], [1, 2, 2])
         self.assertEqual((match["maps"][0]["team1_score"], match["maps"][0]["team2_score"]), (13, 10))
         self.assertEqual((match["team1"]["score"], match["team2"]["score"]), (1, 2))
-
-    def test_live_match_without_round_score(self):
-        match = bo3.normalize_match(bo3_fixture("match_live"))
-        self.assertEqual(match["status"], "live")
-        self.assertEqual([m["status"] for m in match["maps"]], ["live", "upcoming", "upcoming"])
-        self.assertFalse(watcher.assess(match, CFG)["should_record"])  # 第一张图不是决胜图
-        # BO1 / 决胜图正在打、但没有回合比分：直接录
-        decider = {**match, "best_of": 1}
-        result = watcher.assess(decider, CFG)
-        self.assertTrue(result["deciding"] and result["should_record"])
-        self.assertEqual(result["interval"], CFG["intervals"]["recording"])
-
-    def test_no_round_score_waits_for_deciding_map_to_run(self):
-        # 实测：BO3 0:1、第二张图刚开打就开录太早；改为决胜图开打 N 分钟后再录
-        raw = bo3_fixture("match_live")
-        raw["team2_score"] = 1
-        raw["games"][-1]["status"] = "finished"
-        raw["games"][1]["status"] = "current"
-        match = bo3.normalize_match(raw)
-        current = next(m for m in match["maps"] if m["status"] == "live")
-        wait = CFG["no_score_record_minutes"] * 60
-        now = 1_800_000_000
-        current["began_at"] = now - 5 * 60
-        early = watcher.assess(match, CFG, now=now)
-        self.assertTrue(early["deciding"])
-        self.assertFalse(early["should_record"])
-        self.assertEqual(early["interval"], watcher.DECIDING_SLOW_CAP)
-        current["began_at"] = now - wait + 60
-        self.assertEqual(watcher.assess(match, CFG, now=now)["interval"], 65)  # 到点前一分钟：到点再查
-        current["began_at"] = now - wait
-        self.assertTrue(watcher.assess(match, CFG, now=now)["should_record"])
-        current["began_at"] = None  # 不知道开打时间：保险起见直接录
-        self.assertTrue(watcher.assess(match, CFG, now=now)["should_record"])
-
-    def test_round_score_from_hltv_uses_normal_thresholds(self):
-        raw = bo3_fixture("match_live")
-        raw["team2_score"] = 1
-        raw["games"][-1]["status"] = "finished"
-        raw["games"][1]["status"] = "current"
-        match = bo3.normalize_match(raw)
-        name = next(m for m in match["maps"] if m["status"] == "live")["name"]
-        with_score = {**match, "has_round_score": True,
-                      "live": {"map": name, "round": 8, "team1": 3, "team2": 4, "source": "scoreboard"}}
-        result = watcher.assess(with_score, CFG, now=1_800_000_000)
-        self.assertFalse(result["should_record"])
-        self.assertEqual(result["interval"], watcher.DECIDING_SLOW_CAP)
-        with_score["live"] = {**with_score["live"], "team2": CFG["record_at"]}
-        self.assertTrue(watcher.assess(with_score, CFG)["should_record"])
-
-    def test_stale_final_board_between_maps_does_not_start_recording(self):
-        # 实测 FaZe vs Falcons：Anubis 13:10 打完成了 1:1，决胜图还没被标成 live，比分板停在 13:10，
-        # 被当成决胜图赛点方 13 分，暂停录制一分钟后又自动开录
-        match = make_match(finished=(1, 2))
-        match["maps"][-1]["name"] = "Anubis"
-        match["maps"].append({"name": "Mirage", "team1_score": None, "team2_score": None,
-                              "status": "upcoming", "winner": None})
-        match["scoreboard"] = {"round": 24, "map": "Anubis",
-                               "ct": {"team": "MIBR", "score": 10}, "t": {"team": "fnatic", "score": 13}}
-        self.assertIsNone(match_sources.live_map_score(match))
-        result = watcher.assess({**match, "live": match_sources.live_map_score(match)}, CFG)
-        self.assertTrue(result["deciding"])
-        self.assertFalse(result["should_record"])
-        self.assertLessEqual(result["interval"], watcher.DECIDING_SLOW_CAP)
-        # 决胜图一旦被标成正在打、比分板换到新图，照常按新比分判断
-        match["maps"][-1]["status"] = "live"
-        match["scoreboard"] = {"round": 12, "map": "Mirage",
-                               "ct": {"team": "MIBR", "score": 10}, "t": {"team": "fnatic", "score": 4}}
-        self.assertTrue(watcher.assess({**match, "live": match_sources.live_map_score(match)}, CFG)["should_record"])
-
-    def test_deciding_map_never_waits_idle_interval(self):
-        # 实测：决胜图读不到回合比分时按 10 分钟空闲间隔检查，整张图都没检查到
-        unknown = watcher.assess(make_match(finished=(1,)), CFG)
-        self.assertFalse(unknown["live"] is not None)
-        self.assertLessEqual(unknown["interval"], watcher.DECIDING_SLOW_CAP)
-        recording = watcher.assess(make_match(finished=(1,), live_score=(3, 4)), CFG, recording=True)
-        self.assertEqual(recording["interval"], CFG["intervals"]["recording"])
-
-    def test_hltv_without_round_score_falls_back_to_timed_recording(self):
-        # 实测 Aurora vs G2：HLTV 来源永远标 has_round_score=True，读不到比分时「开打 N 分钟后录」的兜底不生效
-        match = make_match(finished=(1,))
-        match["maps"].append({"name": "Mirage", "team1_score": None, "team2_score": None,
-                              "status": "live", "winner": None})
-
-        class Client:
-            async def watch_match(self, match_id, reload=False):
-                return match
-
-        source = match_sources.HLTVSource(Client())
-        read = asyncio.run(source.read({"match_hltv_id": "1"}))
-        self.assertFalse(read["has_round_score"])
-        now = 1_800_000_000
-        wait = CFG["no_score_record_minutes"] * 60
-        read["maps"][-1]["began_at"] = now - wait
-        self.assertTrue(watcher.assess(read, CFG, now=now)["should_record"])
-        read["maps"][-1]["began_at"] = now - 60
-        self.assertFalse(watcher.assess(read, CFG, now=now)["should_record"])
-
-    def test_scoreboard_overrides_map_wrongly_marked_finished(self):
-        # 实测：Mirage 加时 14:13，地图栏却按半场比分标成 team1 胜（8:4）
-        board = {"round": 28, "map": "Mirage", "ct": {"team": "Legacy", "score": 14}, "t": {"team": "The MongolZ", "score": 13}}
-        match = {"scoreboard": board, "maps": [
-            {"name": "Mirage", "team1_score": 8, "team2_score": 4, "status": "finished", "winner": 1},
-            {"name": "Dust2", "team1_score": None, "team2_score": None, "status": "live", "winner": None},
-            {"name": "Ancient", "team1_score": None, "team2_score": None, "status": "upcoming", "winner": None},
-        ]}
-        fixed = match_sources.reconcile_scoreboard(match)
-        self.assertEqual([(m["name"], m["status"], m["winner"]) for m in fixed["maps"]],
-                         [("Mirage", "live", None), ("Dust2", "upcoming", None), ("Ancient", "upcoming", None)])
-        # 比分板停在刚打完的那张图上（换图前）：地图栏是对的，不改
-        board.update(ct={"team": "Legacy", "score": 13}, t={"team": "The MongolZ", "score": 9})
-        self.assertIs(match_sources.reconcile_scoreboard(match), match)
-        board.update(ct={"team": "Legacy", "score": 19}, t={"team": "The MongolZ", "score": 17})
-        self.assertIs(match_sources.reconcile_scoreboard(match), match)
-
-    def test_map_key(self):
-        self.assertEqual(watcher._map_key("de_dust2"), watcher._map_key("Dust 2"))
-        self.assertNotEqual(watcher._map_key("Inferno"), watcher._map_key("Nuke"))
-
-    def test_series_score_counts_before_map_winner_is_filled(self):
-        # 实测：图刚打完时大比分已经是 1:0，这张图的胜方还没填
-        raw = bo3_fixture("match_live")
-        raw["team1_score"] = 1
-        raw["games"][-1]["status"] = "finished"
-        match = bo3.normalize_match(raw)
-        self.assertEqual([m["winner"] for m in match["maps"]], [None, None, None])
-        result = watcher.assess(match, CFG)
-        self.assertEqual(result["map_wins"], [1, 0])
-        self.assertTrue(result["deciding"])
-        self.assertFalse(result["should_record"])  # 第二张图还没开打
-        raw["games"][1]["status"] = "current"
-        self.assertTrue(watcher.assess(bo3.normalize_match(raw), CFG)["should_record"])
 
     def test_find_match_by_names_and_time(self):
         results = bo3_fixture("list")["results"]
@@ -337,90 +97,6 @@ class Bo3Test(unittest.TestCase):
         self.assertEqual(bo3.map_display_name("de_dust2"), "Dust2")
 
 
-class StreamTest(unittest.TestCase):
-    def setUp(self):
-        # 这些测试没有数据库：默认没有别的任务在录
-        patcher = unittest.mock.patch.object(live, "streams_in_use", return_value=set())
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def test_picks_official_stream(self):
-        streams = [{"provider": "twitch", "name": "strogo", "country": "Russia", "viewers": 44089, "url": "u1"},
-                   {"provider": "youtube", "name": "PGL", "country": "Other", "viewers": 0, "url": "u2"},
-                   {"provider": "twitch", "name": "PGL", "country": "Other", "viewers": 34431, "url": "u3"}]
-        self.assertEqual(live.pick_stream(streams)["url"], "u3")
-        self.assertIsNone(live.pick_stream([]))
-        official = live.pick_stream(P.parse_match(fixture("match_upcoming"))["streams"])
-        self.assertEqual((official["name"], official["provider"]), ("PGL", "twitch"))
-
-    def test_event_named_channel_beats_hltv_other(self):
-        # 实测 DFRAG Invitational：HLTV 把个人主播标成 Other，官方 DFragTV 只在 bo3.gg 上且没标官方
-        task = {"id": 999, "source_type": "live", "context": {"match": {"event": "DFRAG Invitational 2026", "streams": [
-            {"provider": "kick", "name": "MominPK", "country": "Other", "viewers": 468, "url": "https://kick.com/mominpk"}]}}}
-        state = {"streams": [{"provider": "kick", "name": "DFragTV", "country": "en", "viewers": 0,
-                              "url": "https://kick.com/dfragtv", "source": "bo3"}]}
-        with unittest.mock.patch.object(live, "remembered_streams", return_value=[]):
-            picked = live.pick_stream(live.candidate_streams(task, state))
-        self.assertEqual(picked["url"], "https://kick.com/dfragtv")
-        self.assertEqual(live.event_keywords("PGL Masters Bucharest 2026"), ["pgl", "bucharest"])
-
-    def test_candidate_streams_merge_and_rank(self):
-        task = {"id": 1, "context": {"match": {"streams": [
-            {"provider": "twitch", "name": "PGL", "country": "Other", "viewers": 5, "url": "https://www.twitch.tv/pgl"}]}}}
-        state = {"streams": [
-            {"provider": "kick", "name": "x", "country": "Other", "viewers": 900, "url": "https://kick.com/x", "source": "bo3"},
-            {"provider": "twitch", "name": "PGL", "country": "Other", "viewers": 0, "url": "https://www.twitch.tv/PGL/", "source": "bo3"}]}
-        merged = live.candidate_streams(task, state)
-        self.assertEqual(len(merged), 2)  # 同一个地址只留一个
-        self.assertEqual(live.pick_stream(merged)["url"], "https://www.twitch.tv/PGL/")
-
-    def test_youtube_video_link_loses_to_channel_streams(self):
-        # 实测 Nemiga vs Vitality：预约时 HLTV 给的 PGL YouTube 链接第二天已是前一天的回放
-        streams = [
-            {"provider": "youtube", "name": "PGL", "country": "Other", "viewers": 0,
-             "url": "https://www.youtube.com/watch?v=swMquqtyh-A", "source": "hltv"},
-            {"provider": "twitch", "name": "PGL", "country": "Other", "viewers": 205,
-             "url": "https://www.twitch.tv/pgl", "source": "bo3"},
-            {"provider": "kick", "name": "PGL", "country": "Other", "viewers": 252,
-             "url": "https://kick.com/pgl", "source": "bo3"}]
-        self.assertEqual(live.pick_stream(streams)["url"], "https://www.twitch.tv/pgl")
-        self.assertEqual(live.pick_stream([streams[0], streams[2]])["url"], "https://kick.com/pgl")
-        self.assertTrue(live.is_video_link("https://youtu.be/abc"))
-        self.assertTrue(live.is_video_link("https://www.youtube.com/live/abc"))
-        self.assertFalse(live.is_video_link("https://www.youtube.com/@PGL/live"))
-
-    def test_remembered_and_in_use_streams_lose_to_this_match_streams(self):
-        # 实测 IEM Beijing 2026：A 路在录另一场，这场在 B 路，HLTV 把 B 路标成英国
-        task = {"id": 2, "context": {"match": {"event": "IEM Beijing 2026", "streams": []}}}
-        state = {"streams": [
-            {"provider": "twitch", "name": "ESL TV", "country": "United Kingdom", "viewers": 7000, "url": "https://www.twitch.tv/eslcs"},
-            {"provider": "twitch", "name": "ESL TV B", "country": "United Kingdom", "viewers": 3906, "url": "https://www.twitch.tv/eslcsb"},
-            {"provider": "twitch", "name": "watchfulTV", "country": "Russia", "viewers": 1309, "url": "https://www.twitch.tv/watchfulTV"}]}
-        memory = [{"provider": "twitch", "name": "ESL TV", "country": "Other", "viewers": 0,
-                   "url": "https://www.twitch.tv/eslcs", "source": "memory"}]
-        with unittest.mock.patch.object(live, "remembered_streams", return_value=memory), \
-                unittest.mock.patch.object(live, "streams_in_use", return_value={"https://www.twitch.tv/eslcs"}):
-            merged = live.candidate_streams(task, state)
-            self.assertEqual(live.pick_stream(merged)["url"], "https://www.twitch.tv/eslcsb")
-            self.assertFalse(any(s.get("source") == "memory" for s in merged))
-            # 人气更高的 Twitch 二路解说也比不过官方的 ESL 频道
-            state["streams"].append({"provider": "twitch", "name": "gaules", "country": "Brazil", "viewers": 40000,
-                                     "url": "https://www.twitch.tv/gaules"})
-            self.assertEqual(live.pick_stream(live.candidate_streams(task, state))["url"], "https://www.twitch.tv/eslcsb")
-            # 这场比赛自己没有直播源时才用同一赛事用过的
-            merged = live.candidate_streams(task, {"streams": []})
-            self.assertEqual(live.pick_stream(merged)["source"], "memory")
-
-    def test_bad_streams_are_excluded(self):
-        task = {"id": 1, "context": {"match": {"streams": []}}}
-        state = {"bad_streams": ["https://www.twitch.tv/pgl"], "streams": [
-            {"provider": "twitch", "name": "PGL", "country": "Other", "url": "https://www.twitch.tv/PGL/", "source": "bo3"},
-            {"provider": "kick", "name": "PGL", "country": "Other", "url": "https://kick.com/pgl", "source": "bo3"}]}
-        with unittest.mock.patch.object(live, "remembered_streams", return_value=[]):
-            merged = live.candidate_streams(task, state)
-        self.assertEqual([s["url"] for s in merged], ["https://kick.com/pgl"])
-
-
 class NotLiveTest(unittest.TestCase):
     def test_faster_than_realtime_means_replay(self):
         from backend.pipeline.recorder import is_faster_than_live, recorded_since
@@ -434,67 +110,6 @@ class NotLiveTest(unittest.TestCase):
             write_chunk(directory, now, 30, 1)
             write_chunk(directory, now + 10, 30, 1)
             self.assertAlmostEqual(recorded_since(directory, now), 60, places=3)
-
-
-class DetectRetractTest(unittest.TestCase):
-    def test_later_no_interview_answer_retracts_start(self):
-        # 实测：一次判断把预录专访当成采访开始，之后都说没有采访，起点却一直留着，最后超时截了无关内容
-        from backend import config
-        from backend.pipeline import stages
-        with tempfile.TemporaryDirectory() as tmp:
-            workdir = Path(tmp)
-            lines = [{"start": t, "end": t + 20, "text": "casters talking"} for t in range(0, 2400, 20)]
-            (workdir / "live_transcript.jsonl").write_text(
-                "".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
-            (workdir / "live.json").write_text(json.dumps({
-                "recording": {"started_at": 1000.0},
-                "detection": {"started": True, "start": 2116.0, "started_at": time.time(), "checked_until": 2000},
-            }), encoding="utf-8")
-            fake_db = unittest.mock.MagicMock()
-            fake_db.get_task.return_value = {"id": 1, "state": "recording", "title": "t", "context": {}}
-            fake_db.get_settings.return_value = {**DEFAULT_SETTINGS, "live": {**CFG, "detect_interval": 0},
-                                                 "llm": {"clean": {"provider_id": "x"}}}
-            answer = '{"started": false, "ended": false, "note": "pre-recorded segment"}'
-            session = live.LiveSession.__new__(live.LiveSession)
-            session.task_id, session.workdir, session.manager = 1, workdir, unittest.mock.MagicMock()
-            with unittest.mock.patch.object(config, "task_dir", return_value=workdir), \
-                    unittest.mock.patch.object(live, "db", fake_db), \
-                    unittest.mock.patch.object(stages, "_llm_call", return_value=answer):
-                session._detect()
-            detection = json.loads((workdir / "live.json").read_text(encoding="utf-8"))["detection"]
-            self.assertFalse(detection["started"])
-            self.assertNotIn("start", detection)
-            self.assertIn("撤回", fake_db.add_event.call_args[0][1])
-
-    def test_end_at_transcript_edge_is_not_accepted(self):
-        # 实测：采访换人时 LLM 把转写最后一行当成结束，必须等结束点之后有足够内容才算
-        from backend import config
-        from backend.pipeline import stages
-        with tempfile.TemporaryDirectory() as tmp:
-            workdir = Path(tmp)
-            lines = [{"start": t, "end": t + 30, "text": "talk"} for t in range(0, 840, 30)]
-            (workdir / "live_transcript.jsonl").write_text(
-                "".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
-            (workdir / "live.json").write_text(json.dumps({"recording": {"started_at": 1000.0}, "match_over_at": 1600.0}),
-                                               encoding="utf-8")
-            fake_db = unittest.mock.MagicMock()
-            fake_db.get_task.return_value = {"id": 1, "state": "recording", "title": "t", "context": {}}
-            fake_db.get_settings.return_value = {**DEFAULT_SETTINGS, "live": {**CFG, "detect_interval": 0},
-                                                 "llm": {"clean": {"provider_id": "x"}}}
-            session = live.LiveSession.__new__(live.LiveSession)
-            session.task_id, session.workdir, session.manager = 1, workdir, unittest.mock.MagicMock()
-
-            def detect(end: str):
-                answer = json.dumps({"started": True, "start": "11:30", "ended": True, "end": end})
-                with unittest.mock.patch.object(config, "task_dir", return_value=workdir), \
-                        unittest.mock.patch.object(live, "db", fake_db), \
-                        unittest.mock.patch.object(stages, "_llm_call", return_value=answer):
-                    live.mutate_state(1, lambda s: s.setdefault("detection", {}).update(checked_until=-1))
-                    session._detect()
-                return json.loads((workdir / "live.json").read_text(encoding="utf-8"))["detection"]
-            self.assertIsNone(detect("13:30")["pending_end"])   # 转写到 14:00，只多了 30 秒
-            self.assertEqual(detect("12:30")["pending_end"], 780)  # 之后有 60 秒内容
-
 
 def write_chunk(directory: Path, start: float, seconds: float, value: int) -> Path:
     path = directory / time.strftime("c_%Y%m%d_%H%M%S.wav", time.localtime(start))
@@ -529,12 +144,9 @@ class TimelineTest(unittest.TestCase):
             # 50 秒起：第一段 → 第二段 → 断流期间的静音 → 重连后的第三段
             self.assertEqual([sample(5), sample(20), sample(100), sample(155)], [1, 2, 0, 3])
 
-    def test_detection_window_and_line_end(self):
+    def test_line_end(self):
         lines = [{"start": t, "end": t + 20, "text": "x"} for t in range(0, 3000, 20)]
-        self.assertGreaterEqual(live.detection_window(lines, None)[0]["end"], lines[-1]["end"] - live.DETECT_WINDOW)
-        self.assertEqual(live.detection_window(lines, 600)[0]["start"], 520)
         self.assertEqual(live.line_end_at(lines, 160), 180)
-
 
 
 def shots_from(spec):
@@ -577,74 +189,6 @@ class ShotTimelineTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             live.parse_shot_labels({"labels": ["desk"]}, 3)
 
-
-
-class CameraDetectTest(unittest.TestCase):
-    def run_detect(self, shots_spec, answers, transcript_until=1200, over_at=1600.0):
-        """over_at：比赛结束的时刻（录制从 1000 开始，默认录制第 600 秒结束），None = 还没报结束。"""
-        from backend import config
-        from backend.pipeline import stages
-        with tempfile.TemporaryDirectory() as tmp:
-            workdir = Path(tmp)
-            lines = [{"start": t, "end": t + 30, "text": "talk"} for t in range(0, transcript_until, 30)]
-            (workdir / "live_transcript.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines), encoding="utf-8")
-            (workdir / "shots.jsonl").write_text("".join(json.dumps(x) + "\n" for x in shots_from(shots_spec)),
-                                                 encoding="utf-8")
-            (workdir / "live.json").write_text(json.dumps({"recording": {"started_at": 1000.0}, "match_over_at": over_at}),
-                                               encoding="utf-8")
-            fake_db = unittest.mock.MagicMock()
-            fake_db.get_task.return_value = {"id": 1, "state": "interview_detecting", "title": "t", "context": {}}
-            fake_db.get_settings.return_value = {**DEFAULT_SETTINGS, "live": {**CFG, "detect_interval": 0},
-                                                 "llm": {"clean": {"provider_id": "x"}}}
-            session = live.LiveSession.__new__(live.LiveSession)
-            session.task_id, session.workdir, session.manager = 1, workdir, unittest.mock.MagicMock()
-            for answer in answers:
-                with unittest.mock.patch.object(config, "task_dir", return_value=workdir), \
-                        unittest.mock.patch.object(live, "db", fake_db), \
-                        unittest.mock.patch.object(stages, "_llm_call", return_value=json.dumps(answer)):
-                    live.mutate_state(1, lambda s: s.setdefault("detection", {}).update(checked_until=-1))
-                    session._detect()
-            return session.manager.capture
-
-    def test_captures_when_camera_cuts_away(self):
-        spec = [(t, "desk") for t in range(600, 700, 5)] + [(t, "interview") for t in range(700, 925, 5)]
-        spec += [(t, "desk") for t in range(925, 1000, 5)]
-        capture = self.run_detect(spec, [{"started": True, "start": "11:30", "ended": False}])
-        capture.assert_called_once_with(1, 690, 925.0, "auto")
-
-    def test_transcript_end_ignored_while_interview_shot_continues(self):
-        # 实测换人提问时转写两次判定在 13:30 结束；画面上采访还在继续
-        spec = [(t, "interview") for t in range(700, 1200, 5)]
-        answer = {"started": True, "start": "11:30", "ended": True, "end": "13:30"}
-        capture = self.run_detect(spec, [answer, answer])
-        capture.assert_not_called()
-
-    def test_no_capture_before_match_over(self):
-        # 实测 Aurora vs Liquid：图间台上聊天被判成采访，比赛没结束不能截取（会停掉录音）
-        spec = [(t, "desk") for t in range(600, 700, 5)] + [(t, "interview") for t in range(700, 925, 5)]
-        spec += [(t, "desk") for t in range(925, 1000, 5)]
-        capture = self.run_detect(spec, [{"started": True, "start": "11:30", "ended": False}], over_at=None)
-        capture.assert_not_called()
-
-    def test_start_long_before_match_over_is_not_the_interview(self):
-        spec = [(t, "desk") for t in range(600, 700, 5)] + [(t, "interview") for t in range(700, 925, 5)]
-        spec += [(t, "desk") for t in range(925, 1000, 5)]
-        # 比赛在录制第 1500 秒结束，判定的起点 690 早了 13 分多钟
-        capture = self.run_detect(spec, [{"started": True, "start": "11:30", "ended": False}], over_at=2500.0)
-        capture.assert_not_called()
-
-    def test_other_teams_interview_is_ignored(self):
-        # 实测 HEROIC vs B8：同一路直播后来播了下一场 Aurora 选手的赛前采访
-        spec = [(t, "desk") for t in range(600, 700, 5)] + [(t, "interview") for t in range(700, 925, 5)]
-        spec += [(t, "desk") for t in range(925, 1000, 5)]
-        capture = self.run_detect(spec, [{"started": True, "start": "11:30", "ended": False, "team": "other"}])
-        capture.assert_not_called()
-
-
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RecorderOutageTest(unittest.TestCase):
     def test_one_error_per_outage(self):
         from backend.pipeline import recorder
@@ -669,3 +213,7 @@ class RecorderOutageTest(unittest.TestCase):
             rec._run()
         # 第 3 次失败报错，之后不再报；恢复后再断（失败次数仍在累计）立刻再报一次
         self.assertEqual([i for i, level in enumerate(events) if level == "error"], [2, 5])
+
+
+if __name__ == "__main__":
+    unittest.main()

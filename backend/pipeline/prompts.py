@@ -224,13 +224,6 @@ def build_name_resolution_prompt(contexts: Dict[str, List[str]], context: Dict[s
 
 # ── 直播采访定位 ──────────────────────────────────────────────────────────────
 
-INTERVIEW_DETECT_SYSTEM = (
-    "You monitor the live broadcast of a CS2 match near and after its end. You read a rolling, timestamped "
-    "speech-to-text transcript of the official stream and locate the post-match player interview. "
-    "You answer with strict JSON only."
-)
-
-
 def parse_clock(text: Any) -> Optional[float]:
     """"12:34" / "1:02:03" / 754 → 秒数"""
     if text is None or text == "":
@@ -250,41 +243,6 @@ def parse_clock(text: Any) -> Optional[float]:
 
 def format_live_lines(lines: List[Dict[str, Any]]) -> str:
     return "\n".join(f"[{format_timestamp(line['start'])}] {line['text']}" for line in lines)
-
-
-def build_interview_detect_prompt(lines: List[Dict[str, Any]], context: Dict[str, Any],
-                                  match_over_at: Optional[float], shots: str = "") -> str:
-    teams = context.get("teams") or []
-    roster = "\n".join(f"- {t.get('name')}: {', '.join(t.get('players') or [])}" for t in teams)
-    match = context.get("match") or {}
-    score = match.get("score") or []
-    result = ""
-    if len(teams) == 2 and len(score) == 2 and None not in score:
-        result = f"Final result: {teams[0]['name']} {score[0]}:{score[1]} {teams[1]['name']}\n"
-    if match_over_at is not None:
-        over = f"The match ended at about [{format_timestamp(match_over_at)}].\n"
-    else:
-        over = ("The match may still be in progress (the recording started during the last map); "
-                "live game commentary is not the interview.\n")
-    return f"""Event: {match.get('event') or 'unknown'}
-{result}Rosters:
-{roster or '(unknown)'}
-{over}
-Timestamps are [mm:ss] (minutes may exceed 59) since the recording started. The transcript is machine-generated, so names may be misspelled.
-
-Transcript:
-{format_live_lines(lines)}
-{shots}
-A post-match interview is a host or interviewer asking a player (or coach) of these teams questions and the player answering, usually right after the match, sometimes with a translator. Casters' analysis, replays, ads, desk talk between analysts and the next match are NOT the interview.
-
-Answer with JSON:
-{{"started": bool, "start": "mm:ss" or null, "ended": bool, "end": "mm:ss" or null, "interviewee": player name or null, "team": the interviewee's team (one of the two teams above), "other" or null, "confidence": 0.0-1.0, "note": short reason}}
-
-Rules:
-- "start" is the timestamp of the line where the interviewer starts (greeting or first question).
-- Set "ended" true only if the transcript clearly continues with other content after the interview (casters or analysts talking among themselves, ads, next segment). Questions from the interviewer, even about the next match, are still part of the interview. If the interviewer brings in another player (e.g. "X, come here"), the interview continues. If the transcript ends while the interview may still be going, set "ended" false. "end" is the last line of the interview.
-- The interview must be with a player or coach of one of the two teams above. The broadcast often continues with other content on the same stream: pre-match interviews or features with players of the NEXT match, other teams' players at the desk. If the interviewee clearly belongs to another team (judge from the rosters and what they talk about: their own team, lineup, opponents), set "team" to "other" and started=false. If you cannot tell yet, use null.
-- If no interview is visible yet, return started=false."""
 
 
 INTERVIEW_SCAN_SYSTEM = (

@@ -20,10 +20,10 @@ from backend.runner import State
 CFG = DEFAULT_SETTINGS["live"]
 
 
-def make_task(state=State.RECORDING, source_type="live", **extra):
-    task = {"id": 7, "title": "Vitality vs MOUZ · IEM Chengdu", "state": state, "stage": None,
-            "source_type": source_type, "match_time": time.time() + 3600, "error": None, "updated_at": time.time(),
-            "context": {"match": {"event": "IEM Chengdu", "format": "Best of 3", "unix_ms": 1_700_000_000_000}}}
+def make_task(state=State.PROCESSING, source_type="live", **extra):
+    task = {"id": 7, "title": "IEM Chengdu ZywOo (Vitality) 赛后采访", "state": state, "stage": None,
+            "source_type": source_type, "error": None, "updated_at": time.time(), "created_at": time.time(),
+            "context": {"monitor": {"id": 2, "event_name": "IEM Chengdu"}, "match": {"event": "IEM Chengdu"}}}
     task.update(extra)
     return task
 
@@ -51,46 +51,30 @@ def text_of(card):
 
 
 class BuildCardTest(unittest.TestCase):
-    def test_recording_card(self):
-        state = {
-            "stream": {"name": "ESL_CS", "url": "https://twitch.tv/esl_cs"},
-            "recording": {"started_at": time.time() - 600},
-            "snapshot": {"summary": "Vitality 1:1 MOUZ（Inferno 9:11）", "reason": "决胜图赛点方 11 分",
-                         "next_check_at": time.time() + 60,
-                         "maps": [{"name": "Mirage", "team1_score": 13, "team2_score": 9, "status": "finished"},
-                                  {"name": "Nuke", "team1_score": 10, "team2_score": 13, "status": "finished"},
-                                  {"name": "Inferno", "team1_score": None, "team2_score": None, "status": "live"}]},
-        }
-        card = task_cards.build_card(make_task(), state, cfg=CFG)
+    def test_processing_card(self):
+        state = {"recording": {"started_at": time.time() - 600}, "interview": {"start": 60, "end": 300, "source": "auto"}}
+        card = task_cards.build_card(make_task(stage="transcribe"), state, cfg=CFG)
         self.assertEqual(card["schema"], "2.0")
         self.assertTrue(card["config"]["update_multi"])
-        self.assertEqual(card["header"]["template"], "red")
-        self.assertIn("录制中", card["config"]["summary"]["content"])
+        self.assertEqual(card["header"]["template"], "wathet")
         body = text_of(card)
-        self.assertIn("🔴 **录制**", body)
-        self.assertIn("Mirage 13:9 · Nuke 10:13 · Inferno ▶", body)
-        self.assertIn("ESL_CS", body)
-        self.assertEqual(callbacks(card), ["stream", "check", "match_over", "no_interview"])
+        self.assertIn("✅ 采访 → 🔵 **初稿** → ⚪ 精校", body)
+        self.assertIn("正在语音转写", body)
+        self.assertEqual(callbacks(card), [])
         self.assertLess(len(json.dumps(card, ensure_ascii=False).encode("utf-8")), 30 * 1024)
-
-    def test_reserved_card_buttons(self):
-        card = task_cards.build_card(make_task(State.RESERVED), {}, cfg=CFG)
-        self.assertEqual(callbacks(card), ["check", "record", "cancel"])
-        cancel = card["body"]["elements"][-1]["columns"][2]["elements"][0]
-        self.assertIn("confirm", cancel)
-        self.assertIn("开赛前 15 分钟开始监视", text_of(card))
 
     def test_review_card_shows_suspects(self):
         report = {"suspects": [{"token": "Shearer", "candidates": ["sh1ro"]}], "unknown": []}
-        card = task_cards.build_card(make_task(State.REVIEW), {"interview": {"start": 60, "end": 300, "source": "auto"}},
+        card = task_cards.build_card(make_task(State.REVIEW), {"recording": {"started_at": time.time()},
+                                                               "interview": {"start": 60, "end": 300, "source": "auto"}},
                                      names_report=report, cfg=CFG)
         self.assertEqual(callbacks(card), ["done"])
         self.assertIn("Shearer（可能是 sh1ro）", text_of(card))
-        self.assertIn("录音 01:00–05:00（自动判定）", text_of(card))
+        self.assertIn("（自动判定）", text_of(card))
         self.assertEqual(card["header"]["template"], "orange")
 
     def test_reserved_by_mention(self):
-        card = task_cards.build_card(make_task(State.RESERVED), {}, cfg=CFG, reserved_by="ou_abc")
+        card = task_cards.build_card(make_task(), {}, cfg=CFG, reserved_by="ou_abc")
         self.assertIn("<at id=ou_abc></at>", text_of(card))
 
     def test_events_skip_pipeline_noise(self):
@@ -104,10 +88,10 @@ class BuildCardTest(unittest.TestCase):
         self.assertIn("正在语音转写", body)
 
     def test_step_track(self):
-        track = task_cards.step_track(make_task(State.NO_INTERVIEW), {"recording": {}, "match_over_at": 1})
-        self.assertEqual([m for _, m in track], ["done", "done", "done", "stopped", "todo", "todo"])
+        track = task_cards.step_track(make_task(State.CANCELLED), {})
+        self.assertEqual([m for _, m in track], ["done", "stopped", "todo"])
         track = task_cards.step_track(make_task(State.FAILED, stage="clean"), {"interview": {}})
-        self.assertEqual(track[4], ("初稿", "failed"))
+        self.assertEqual(track[1], ("初稿", "failed"))
         track = task_cards.step_track(make_task(State.DONE), {})
         self.assertTrue(all(m == "done" for _, m in track))
         track = task_cards.step_track(make_task(State.PROCESSING, source_type="url"), {})
@@ -152,51 +136,14 @@ class CardServiceTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.service = task_cards.TaskCardService()
-        self.task = db.create_task(title="A vs B", state=State.RESERVED, source_type="live", match_hltv_id="1")
-        live.patch_state(self.task["id"], recording={"started_at": time.time()})  # 录过才发卡片
+        self.task = db.create_task(title="A vs B", state=State.QUEUED, source_type="live",
+                                   context={"monitor": {"id": 1}})
+        live.patch_state(self.task["id"], recording={"started_at": time.time()},
+                         interview={"start": 0, "end": 60, "source": "auto"})
 
     def tearDown(self):
         db._conn.close()
         self.tmp.cleanup()
-
-    def test_reserved_card_waits_for_match_start(self):
-        task = db.create_task(title="C vs D", state=State.RESERVED, source_type="live", match_hltv_id="2")
-        self.service.track(task["id"])
-        self.service.sync_all()
-        # 预约后立即抓背景信息：短暂处于处理中
-        db.update_task(task["id"], state=State.PROCESSING, stage="context")
-        self.service.sync_all()
-        db.update_task(task["id"], state=State.WATCHING)
-        live.patch_state(task["id"], snapshot={"status": "upcoming"})
-        self.service.sync_all()
-        self.assertEqual(self.client.sent, [])
-        live.patch_state(task["id"], recording={"started_at": time.time()})
-        db.update_task(task["id"], state=State.RECORDING)
-        self.service.sync_all()
-        self.assertEqual(len(self.client.sent), 1)
-
-    def test_watching_card_sent_when_match_goes_live(self):
-        task = db.create_task(title="C vs D", state=State.WATCHING, source_type="live", match_hltv_id="2")
-        self.service.track(task["id"])
-        self.service.sync_all()
-        self.assertEqual(self.client.sent, [])
-        live.patch_state(task["id"], snapshot={"status": "live"})
-        self.service.sync_all()
-        self.assertEqual(len(self.client.sent), 1)
-
-    def test_cancelled_reservation_never_sends(self):
-        task = db.create_task(title="C vs D", state=State.RESERVED, source_type="live", match_hltv_id="2")
-        self.service.track(task["id"])
-        db.update_task(task["id"], state=State.CANCELLED)
-        self.service.sync_all()
-        self.assertEqual(self.client.sent, [])
-
-    def test_alert_before_recording_sends_card(self):
-        task = db.create_task(title="C vs D", state=State.WATCHING, source_type="live", match_hltv_id="2")
-        self.service.track(task["id"])
-        self.service.alert(task["id"], "找不到直播源", "请在卡片里填写直播链接")
-        self.assertEqual(len(self.client.sent), 1)
-        self.assertEqual(self.client.replies, [("om_1", "【找不到直播源】请在卡片里填写直播链接")])
 
     def test_manual_task_card_sent_at_once(self):
         task = db.create_task(title="上传", state=State.DRAFT, source_type="file")
@@ -208,23 +155,23 @@ class CardServiceTest(unittest.TestCase):
         self.assertEqual(self.service.sync(self.task["id"]), "om_1")
         self.service.sync(self.task["id"])
         self.assertEqual((len(self.client.sent), len(self.client.updates)), (1, 0))  # 没变化不更新
-        db.update_task(self.task["id"], state=State.WATCHING)
+        db.update_task(self.task["id"], state=State.PROCESSING)
         self.service.sync_all()
         self.assertEqual(len(self.client.updates), 1)
-        self.assertEqual(self.client.updates[0][1]["header"]["text_tag_list"][0]["text"]["content"], "监视中")
+        self.assertEqual(self.client.updates[0][1]["header"]["text_tag_list"][0]["text"]["content"], "处理中")
 
     def test_resend_when_card_expired(self):
         self.service.track(self.task["id"])
         self.service.sync(self.task["id"])
-        db.update_task(self.task["id"], state=State.WATCHING)
+        db.update_task(self.task["id"], state=State.PROCESSING)
         self.client.update_error = feishu.FeishuError("expired", 230031)
         self.assertEqual(self.service.sync(self.task["id"]), "om_2")
         self.assertEqual(db.get_card(self.task["id"])["message_id"], "om_2")
 
     def test_alert_replies_in_card_thread(self):
         self.service.track(self.task["id"])
-        self.service.alert(self.task["id"], "找不到直播源", "请在卡片里填写直播链接")
-        self.assertEqual(self.client.replies, [("om_1", "【找不到直播源】请在卡片里填写直播链接")])
+        self.service.alert(self.task["id"], "处理失败", "英文清洗失败")
+        self.assertEqual(self.client.replies, [("om_1", "【处理失败】英文清洗失败")])
         self.assertEqual(self.client.texts, [])
 
     def test_alert_mention_all(self):
@@ -267,11 +214,11 @@ class CallbackTest(unittest.TestCase):
 
     def test_dispatch_and_toast(self):
         calls = []
-        client = FeishuEventClient(lambda *args: calls.append(args) or "已开始录制")
-        value = {"action": "stream", "task_id": 7}
+        client = FeishuEventClient(lambda *args: calls.append(args) or "已保存直播链接")
+        value = {"action": "monitor_stream", "monitor_id": 7}
         response = client._on_action(self.event(value, {"url": "https://kick.com/x"}))
         self.assertEqual(calls, [(value, {"url": "https://kick.com/x"}, "ou_1", "om_9")])
-        self.assertEqual((response.toast.type, response.toast.content), ("success", "已开始录制"))
+        self.assertEqual((response.toast.type, response.toast.content), ("success", "已保存直播链接"))
 
     def test_no_toast_when_handler_returns_none(self):
         response = FeishuEventClient(lambda *args: None)._on_action(self.event({"action": "schedule"}))
@@ -280,7 +227,7 @@ class CallbackTest(unittest.TestCase):
     def test_error_toast(self):
         def fail(*_):
             raise RuntimeError("任务正在处理中")
-        response = FeishuEventClient(fail)._on_action(self.event({"action": "record", "task_id": 7}))
+        response = FeishuEventClient(fail)._on_action(self.event({"action": "retry", "task_id": 7}))
         self.assertEqual((response.toast.type, response.toast.content), ("error", "任务正在处理中"))
 
     def test_message_dedup_and_text(self):

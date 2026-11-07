@@ -17,13 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 class State:
-    # 第三阶段（直播监视、录音）启用的状态
-    RESERVED = "reserved"
-    WATCHING = "watching"
-    RECORDING = "recording"
-    INTERVIEW_DETECTING = "interview_detecting"
-    NO_INTERVIEW = "no_interview"
-    # 后处理
     DRAFT = "draft"  # 已创建，尚未开始（如等待上传音频）
     QUEUED = "queued"
     PROCESSING = "processing"

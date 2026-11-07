@@ -105,6 +105,9 @@ DEFAULT_ALIASES = [
     ("小蜜蜂", "Vitality"), ("天禄", "TYLOO"),
 ]
 
+# 旧的「预约比赛 → 看比分 → 录制」流程的任务状态：改成直播间监视后不再有，旧任务迁移成已取消
+RETIRED_STATES = ("reserved", "watching", "recording", "interview_detecting", "no_interview")
+
 # 旧库升级时补上的列：列名 → 定义
 MIGRATIONS = {
     "tasks": {"match_time": "REAL"},
@@ -139,6 +142,13 @@ def init_db() -> None:
             for column, definition in columns.items():
                 if column not in existing:
                     _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        marks = ", ".join("?" for _ in RETIRED_STATES)
+        now = time.time()
+        for row in _conn.execute(f"SELECT id FROM tasks WHERE state IN ({marks})", RETIRED_STATES).fetchall():
+            _conn.execute("INSERT INTO task_events (task_id, ts, level, stage, message) VALUES (?, ?, 'warning', NULL, ?)",
+                          (row["id"], now, "预约比赛的流程已改成直播间监视，这个任务已取消；采访会从直播间截取成新任务"))
+        _conn.execute(f"UPDATE tasks SET state = 'cancelled', updated_at = ? WHERE state IN ({marks})",
+                      (now, *RETIRED_STATES))
         _conn.commit()
 
 

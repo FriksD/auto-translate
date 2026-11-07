@@ -22,7 +22,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,6 @@ AUTO_WAIT = 45  # 实测自动通过约 20 秒
 MANUAL_WAIT = 300
 IDLE_CLOSE = 600
 NAV_TIMEOUT_MS = 45000
-SCOREBOARD_WAIT_MS = 15000
 
 
 class HLTVBlockedError(RuntimeError):
@@ -69,8 +68,6 @@ class BrowserFetcher:
         self._last_nav = 0.0
         self._last_used = 0.0
         self._idle_timer: Optional[threading.Timer] = None
-        # 监视中的比赛：key → (标签页, 上次加载时间)
-        self._watched: Dict[str, Tuple[object, float]] = {}
 
     def configure(self, proxy: Optional[str], headless: bool = False) -> None:
         """修改代理或有头/无头模式后，下次访问时用新配置重开浏览器。"""
@@ -88,15 +85,6 @@ class BrowserFetcher:
     def download_sync(self, url: str) -> bytes:
         """下载 HLTV 的图片：img-cdn 同样在 Cloudflare 后面（直接请求是 403），在浏览器标签页里打开取响应内容。"""
         return self._executor.submit(self._download_sync, url).result()
-
-    async def watch(self, key: str, url: str, reload: bool = False) -> Tuple[str, float]:
-        """读取监视标签页的当前内容；标签页不存在或 reload=True 时（重新）加载。返回 (html, 上次加载时间)。"""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._executor, self._watch_sync, key, url, reload)
-
-    async def unwatch(self, key: str) -> None:
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(self._executor, self._unwatch_sync, key)
 
     async def close(self) -> None:
         loop = asyncio.get_running_loop()
@@ -210,47 +198,6 @@ class BrowserFetcher:
             self._last_used = time.time()
             self._schedule_idle_close()
 
-    def _watch_sync(self, key: str, url: str, reload: bool) -> Tuple[str, float]:
-        self._cancel_idle_timer()
-        try:
-            self._ensure_page()
-            entry = self._watched.get(key)
-            page = entry[0] if entry and not entry[0].is_closed() else None
-            if page is None or reload:
-                if page is None:
-                    page = self._context.new_page()
-                self._throttle()
-                logger.info("HLTV 监视页%s: %s", "刷新" if entry else "打开", url)
-                page.goto(url, wait_until="domcontentloaded")
-                self._wait_challenge(page, url)
-                self._watched[key] = (page, time.time())
-                # 进行中的比赛等实时比分板连上 scorebot。比分板的框架（「R: -」占位）随页面就有，
-                # 要等比分真的填进来（实测连上后 2～4 秒）；只等框架出现就读，读到的永远是空比分板
-                if (page.evaluate("() => document.querySelector('.countdown')?.textContent || ''") or "").strip().upper() == "LIVE":
-                    try:
-                        page.wait_for_function(
-                            "() => (document.querySelector('.scoreboard .ctScore')?.textContent || '').trim() !== ''",
-                            timeout=SCOREBOARD_WAIT_MS)
-                    except Exception:
-                        logger.info("实时比分板未出现（可能在换图间隙）: %s", url)
-            return page.content(), self._watched[key][1]
-        except HLTVBlockedError:
-            raise
-        except Exception:
-            self._unwatch_sync(key)
-            raise
-        finally:
-            self._last_used = time.time()
-            self._schedule_idle_close()
-
-    def _unwatch_sync(self, key: str) -> None:
-        entry = self._watched.pop(key, None)
-        if entry:
-            try:
-                entry[0].close()
-            except Exception:
-                pass
-
     def _schedule_idle_close(self) -> None:
         self._idle_timer = threading.Timer(IDLE_CLOSE, lambda: self._executor.submit(self._close_if_idle))
         self._idle_timer.daemon = True
@@ -262,7 +209,7 @@ class BrowserFetcher:
             self._idle_timer = None
 
     def _close_if_idle(self) -> None:
-        if not self._watched and time.time() - self._last_used >= IDLE_CLOSE - 1:
+        if time.time() - self._last_used >= IDLE_CLOSE - 1:
             logger.info("HLTV 浏览器空闲，关闭")
             self._close()
 
@@ -274,4 +221,3 @@ class BrowserFetcher:
             except Exception:
                 pass
         self._context = self._page = self._playwright = None
-        self._watched.clear()

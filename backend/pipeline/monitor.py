@@ -233,6 +233,59 @@ def capture_title(monitor: Dict[str, Any], capture: Dict[str, Any], wall_start: 
     return f"{event} {who} 采访 {time.strftime('%m-%d %H:%M', time.localtime(wall_start))}"
 
 
+# ── 预约 = 直播间时间窗 ─────────────────────────────────────────────────────
+
+def reservation_window(match_id: int, match_time: Optional[float], title: str, cfg: Dict[str, Any], now: float,
+                       reserved_by: Optional[str] = None) -> Dict[str, Any]:
+    """预约一场比赛：开赛前 pre_match_minutes 分钟到开赛后 window_hours 小时；开赛时间未知就从现在开始。"""
+    begin = match_time - int(cfg.get("pre_match_minutes", 15)) * 60 if match_time else now
+    return {"match_id": int(match_id), "title": title, "match_time": match_time, "start": begin,
+            "end": (match_time or now) + float(cfg.get("window_hours", 5)) * 3600, "reserved_by": reserved_by}
+
+
+def find_reservation(monitors: List[Dict[str, Any]], match_id: int) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    for found in monitors:
+        for window in found.get("windows") or []:
+            if str(window.get("match_id")) == str(match_id):
+                return found, window
+    return None
+
+
+def find_event_monitor(monitors: List[Dict[str, Any]], event_id: Any, event_name: str) -> Optional[Dict[str, Any]]:
+    """这个赛事的直播间：赛事 ID 对得上，或赛事名对得上（新的优先）。"""
+    from .identify import same_event_name
+
+    for found in monitors:
+        if event_id and str(found.get("event_id") or "") == str(event_id):
+            return found
+    lowered = (event_name or "").strip().lower()
+    for found in monitors:
+        names = [found.get("event_name") or "", found.get("title") or ""]
+        if lowered and (lowered in (n.strip().lower() for n in names) or same_event_name(event_name, names[0])):
+            return found
+    return None
+
+
+def drop_reservation(windows: List[Dict[str, Any]], match_id: int) -> List[Dict[str, Any]]:
+    return [w for w in windows or [] if str(w.get("match_id")) != str(match_id)]
+
+
+STREAM_PROVIDERS = ("twitch", "youtube", "kick")
+
+
+def official_stream(streams: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    HLTV 比赛页上的官方流：国家标记是 "Other"（地球图标）的，其余基本是各国二路解说；
+    同等条件下 Twitch 优先（有纯音频流）；指向某一场直播的 YouTube 链接（第二天就成了回放）排在频道链接之后。
+    """
+    candidates = [s for s in streams if s.get("url") and s.get("provider") in STREAM_PROVIDERS]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda s: (
+        s.get("country") != "Other", "watch?v=" in s["url"] or "youtu.be/" in s["url"],
+        STREAM_PROVIDERS.index(s["provider"]), -(s.get("viewers") or 0)))
+
+
 # ── 每条链接的运行状态（monitor.json）────────────────────────────────────────
 
 def _jsonl(path: Path) -> List[Dict[str, Any]]:
