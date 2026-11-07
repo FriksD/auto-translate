@@ -831,6 +831,13 @@ class MonitorManager:
                 names += [team.get("name")] + list(team.get("players") or [])
         return [n for n in names if n]
 
+    def known_teams(self, monitor_id: int, exclude: Optional[int] = None) -> List[str]:
+        names = []
+        for task in self._monitor_tasks(monitor_id):
+            if task["id"] != exclude:
+                names += [t.get("name") for t in task["context"].get("teams") or [] if t.get("name")]
+        return list(dict.fromkeys(names))
+
     def teams_text(self, monitor_id: int) -> str:
         seen, lines = set(), []
         for task in self._monitor_tasks(monitor_id):

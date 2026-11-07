@@ -373,8 +373,34 @@ def _format_facts(facts: Dict[str, Any]) -> str:
     if facts.get("just_ended"):
         lines.append("比赛刚刚结束（直播中录到的采访），摘要可以用「就在刚刚」")
     if facts.get("interviewee_guess"):
-        lines.append(f"直播判断的受访者：{facts['interviewee_guess']}（可能不准，以稿件为准）")
+        team = f"（{facts['interviewee_team']}）" if facts.get("interviewee_team") else ""
+        lines.append(f"直播判断的受访者：{facts['interviewee_guess']}{team}（可能不准，以稿件为准）")
     return "\n".join(lines)
+
+
+# 采访类型 → 标题里的叫法、摘要的写法（None：按赛后采访的范例写）
+INTERVIEW_KINDS = {
+    "just_played": ("赛后采访", None),
+    "between_maps": ("采访", "这是系列赛图间的采访，比赛还没打完：摘要不写比分和胜负，写成「赛事中文名今日继续；"
+                           "在X对阵Y的比赛中，受访选手在图间接受了主持人的采访，谈论了…」。"),
+    "upcoming": ("赛前采访", "这是赛前采访，比赛还没打：摘要不写比分和胜负，写成「赛事中文名今日继续；"
+                          "在X对阵Y的比赛开始前，受访选手接受了主持人的采访，谈论了…」（对手不明确就不写对阵）。"),
+    "general": ("采访", "这次采访不是针对某一场比赛：摘要不写比分和胜负，写成「赛事中文名今日继续；"
+                      "受访选手（所在战队）接受了主持人的采访，谈论了…」。"),
+    "unknown": ("采访", "不确定这次采访对应哪场比赛：摘要不写比分和胜负，写成「赛事中文名今日继续；"
+                      "受访选手（所在战队）接受了主持人的采访，谈论了…」。"),
+}
+
+
+def interview_kind(facts: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+    """（标题里的叫法, 摘要的额外要求）"""
+    kind = facts.get("interview_kind") or "just_played"
+    label, rule = INTERVIEW_KINDS.get(kind, INTERVIEW_KINDS["unknown"])
+    if kind == "just_played" and not facts.get("score"):
+        rule = "比分未知（没能确认是哪场比赛）：摘要不写比分和胜负，只写「比赛结束后，受访选手接受了主持人的采访，谈论了…」。"
+    if rule and facts.get("opponent") and facts.get("interviewee_team"):
+        rule = rule.replace("X对阵Y", f"{facts['interviewee_team']}对阵{facts['opponent']}")
+    return label, rule
 
 
 def build_package_prompt(facts: Dict[str, Any], draft: str, title_examples: List[str], summary_examples: List[str],
@@ -388,7 +414,9 @@ def build_package_prompt(facts: Dict[str, Any], draft: str, title_examples: List
         host_line = f"常见主持人：{'、'.join(host_names)}。稿件里能看出主持人是谁就写，看不出就写「接受了采访」，不要猜。"
     else:
         host_line = "稿件里能看出主持人是谁就写，看不出就写「接受了采访」，不要猜。"
-    return f"""为下面这篇 CS2 赛后采访的中文稿拟投稿用的标题和摘要。
+    label, kind_rule = interview_kind(facts)
+    summary_rule = f"\n5. {kind_rule}" if kind_rule else ""
+    return f"""为下面这篇 CS2 选手{label}的中文稿拟投稿用的标题和摘要。
 
 【比赛事实】（比分、队名以此为准，不要改动）
 {_format_facts(facts)}
@@ -403,7 +431,7 @@ def build_package_prompt(facts: Dict[str, Any], draft: str, title_examples: List
 {titles}
 要求：
 1. 给出 4 个候选，按推荐程度排序，第一个最好。
-2. 格式「受访选手赛后采访：核心观点」，选手名必须和稿件里的写法完全一致。
+2. 格式「受访选手{label}：核心观点」，选手名必须和稿件里的写法完全一致。
 3. 核心观点从采访里提炼最有信息量、最有话题性的一句，用选手的第一人称口吻，像引语一样自然，一般 15～30 个字；4 个候选尽量选不同的观点。
 4. 不要加引号、书名号、序号，不要编造稿件里没有的内容。
 
@@ -414,7 +442,7 @@ def build_package_prompt(facts: Dict[str, Any], draft: str, title_examples: List
 1. 一句话（这句话会作为导语放在 Word 正文最前面），照范例的格式：赛事中文名 + 今日继续 / 今日正式落下帷幕 +（比赛刚结束时加「就在刚刚，」）+ 胜者以X-Y的比分击败败者 + 这场比赛的结果（晋级、淘汰、名次，按赛段判断；拿不准就不写）+ ；比赛结束后，受访选手接受了主持人的采访，谈论了…（用一句话概括采访的主要内容，如队伍目前的困境与后续的打算、对手的表现、赛程安排，只写稿件里确实谈到的，不要编造）。不要自己加「听译」备注，程序会加。
 2. 决赛、季军赛写「今日正式落下帷幕」，其他比赛写「今日继续」。
 3. {host_line}
-4. 队名、选手名保留英文，和比赛事实、稿件的写法一致。
+4. 队名、选手名保留英文，和比赛事实、稿件的写法一致。{summary_rule}
 
 【输出】只输出一个 JSON 对象：
 {{"interviewee": "受访选手（稿件里的写法）", "interviewee_team": "受访选手所在战队", "host": "主持人或 null", "event_zh": "赛事中文名", "titles": ["…", "…", "…", "…"], "summary": "…"}}

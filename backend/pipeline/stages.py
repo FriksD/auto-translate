@@ -94,6 +94,26 @@ async def stage_context(task_id: int) -> None:
         db.add_event(task_id, "已有背景信息，跳过抓取（如需刷新请在背景信息页重新抓取）", stage="context")
         return
 
+    monitor_info = context.get("monitor")
+    if monitor_info and not task["match_hltv_id"]:
+        # 直播间截下来的采访：事后识别受访者、战队和对应的比赛
+        from . import identify
+        from .monitor import manager as monitors
+
+        set_progress(task_id, None, "正在识别受访者和对应的比赛...")
+        known = monitors.known_teams(monitor_info.get("id") or 0, exclude=task_id)
+        context, updates, warnings = await identify.build_for_interview(task, hltv, known)
+        for warning in warnings:
+            db.add_event(task_id, warning, level="warning", stage="context")
+        db.update_task(task_id, **updates)
+        identity = context.get("identified") or {}
+        db.add_event(task_id, f"识别结果：{' / '.join(identity.get('interviewees') or []) or '受访者未知'}"
+                              f"（{updates.get('team1') or '战队未知'}），{updates['title']}", stage="context")
+        for team in context.get("teams") or []:
+            if team.get("players"):
+                db.add_event(task_id, f"{team['name']}：{', '.join(team['players'])}", stage="context")
+        return
+
     if task["match_hltv_id"]:
         set_progress(task_id, None, "正在从 HLTV 抓取比赛信息...")
         built, warnings = await context_builder.build_from_match(hltv, int(task["match_hltv_id"]))

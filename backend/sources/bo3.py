@@ -188,7 +188,7 @@ class Bo3Client:
 
     async def list_matches(self, statuses: str, sort: str, limit: int = 100) -> List[Dict[str, Any]]:
         data = await self._get("/matches", {
-            "page[limit]": str(limit), "sort": sort, "with": "teams",
+            "page[limit]": str(limit), "sort": sort, "with": "teams,tournament",
             "filter[matches.status][in]": statuses, "filter[discipline_id][eq]": "1",
         })
         return data.get("results") or []

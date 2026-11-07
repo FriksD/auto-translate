@@ -129,8 +129,18 @@ def match_facts(task: Dict[str, Any], live_state: Dict[str, Any], now: Optional[
         if m.get("team1_score") is not None and m.get("team2_score") is not None and m.get("status") != "live":
             maps.append(f"{m['name']} {m['team1_score']}-{m['team2_score']}")
     when = (match.get("unix_ms") or 0) / 1000 or task.get("match_time")
-    over_at = live_state.get("match_over_at")
     now = now or time.time()
+    identified = context.get("identified")
+    # 直播间截下来的采访：类型由事后识别给出；旧的预约比赛任务都是赛后采访
+    kind = (identified or {}).get("about_match") or "just_played"
+    if identified is None:
+        over_at = live_state.get("match_over_at")
+    else:
+        interview = live_state.get("interview") or {}
+        origin = (live_state.get("recording") or {}).get("started_at")
+        over_at = origin + float(interview.get("end") or 0) if origin and kind == "just_played" and score else None
+    guess = (live_state.get("detection") or {}).get("interviewee") or next(
+        iter((identified or {}).get("interviewees") or []), None)
     return {
         "event": match.get("event") or "",
         "stage": stage,
@@ -142,7 +152,10 @@ def match_facts(task: Dict[str, Any], live_state: Dict[str, Any], now: Optional[
         "maps": maps if len(teams) == 2 else [],
         "date": datetime.fromtimestamp(when, tz=prompts.BEIJING).strftime("%Y-%m-%d") if when else "",
         "just_ended": bool(over_at and now - over_at < JUST_ENDED_SECONDS),
-        "interviewee_guess": (live_state.get("detection") or {}).get("interviewee"),
+        "interviewee_guess": guess,
+        "interview_kind": kind,
+        "interviewee_team": (identified or {}).get("team"),
+        "opponent": (identified or {}).get("opponent"),
     }
 
 
