@@ -84,6 +84,14 @@ CREATE TABLE IF NOT EXISTS monitor_events (
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_events_monitor ON monitor_events(monitor_id);
 
+-- 飞书群里每个直播间的那张卡片
+CREATE TABLE IF NOT EXISTS monitor_cards (
+    monitor_id INTEGER PRIMARY KEY,
+    message_id TEXT,
+    sent_at REAL,
+    digest TEXT
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value_json TEXT NOT NULL
@@ -339,6 +347,7 @@ def update_monitor(monitor_id: int, **fields: Any) -> Dict[str, Any]:
 def delete_monitor(monitor_id: int) -> None:
     with _lock:
         _db().execute("DELETE FROM monitor_events WHERE monitor_id = ?", (monitor_id,))
+        _db().execute("DELETE FROM monitor_cards WHERE monitor_id = ?", (monitor_id,))
         _db().execute("DELETE FROM monitors WHERE id = ?", (monitor_id,))
         _db().commit()
 
@@ -358,6 +367,23 @@ def recent_monitor_events(monitor_id: int, limit: int = 50) -> List[Dict[str, An
             "SELECT * FROM monitor_events WHERE monitor_id = ? ORDER BY id DESC LIMIT ?", (monitor_id, limit)
         ).fetchall()
     return [dict(r) for r in reversed(rows)]
+
+
+def get_monitor_card(monitor_id: int) -> Optional[Dict[str, Any]]:
+    with _lock:
+        row = _db().execute("SELECT * FROM monitor_cards WHERE monitor_id = ?", (monitor_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def save_monitor_card(monitor_id: int, **fields: Any) -> None:
+    """登记或更新直播间卡片（message_id / sent_at / digest）。"""
+    columns = {"monitor_id": monitor_id, **fields}
+    updates = ", ".join(f"{k} = excluded.{k}" for k in fields) or "monitor_id = monitor_id"
+    with _lock:
+        _db().execute(
+            f"INSERT INTO monitor_cards ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)}) "
+            f"ON CONFLICT(monitor_id) DO UPDATE SET {updates}", list(columns.values()))
+        _db().commit()
 
 
 # ── 术语表 ────────────────────────────────────────────────────────────────────

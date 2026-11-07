@@ -5,6 +5,8 @@
   赛程 / 赛程 明天 / 赛程 全部 / 赛程 2星   → 回复一张赛程卡片，可以切换日期、星级，每场比赛一个「预约」按钮
   赛程 vitality / 预约 小蜜蜂                → 按队名（或赛事名、术语表里的别名）搜索未来几天的比赛
   预约 <HLTV 比赛链接>                       → 直接预约这场比赛
+  直播间                                     → 把正在监视的直播间卡片发到群里
+  监视 <直播链接> [赛事名]                    → 给直播间加/换链接并开始监视（没有对应的直播间就新建）
 赛程卡片上的筛选和预约都在原卡片上更新。
 """
 import re
@@ -22,7 +24,9 @@ HELP_TEXT = (
     "· 赛程 —— 今天的比赛，卡片上可以切换日期、星级，点「预约」\n"
     "· 赛程 明天 / 赛程 全部 / 赛程 2星\n"
     "· 预约 vitality —— 按队名或赛事名搜索未来几天的比赛（支持术语表里的别名，如 小蜜蜂）\n"
-    "· 预约 <HLTV 比赛链接> —— 直接预约"
+    "· 预约 <HLTV 比赛链接> —— 直接预约\n"
+    "· 直播间 —— 把正在监视的直播间卡片发到群里，卡片上可以开关、换链接\n"
+    "· 监视 <直播链接> [赛事名] —— 给直播间加/换链接并开始监视，例如：监视 https://live.bilibili.com/35 IEM Beijing 2026"
 )
 
 
@@ -38,11 +42,21 @@ def parse_command(text: str) -> Tuple[str, Dict[str, Any]]:
     返回 (命令, 参数)：
       ("schedule", {"day": 0|1|...|"all"|None, "stars": int, "q": str})
       ("reserve_url", {"url": str})
+      ("monitors", {}) / ("watch", {"url": str, "name": str}) / ("watch_usage", {})
       ("help", {}) / ("unknown", {"text": str})
     """
     text = clean_text(text)
     if text.lower() in ("", "帮助", "help", "?", "？", "菜单"):
         return "help", {}
+    if text in ("直播间", "直播", "monitors"):
+        return "monitors", {}
+    watch = re.match(r"^(监视|监控|watch)\s*(.*)$", text, re.I)
+    if watch:
+        link = re.search(r"https?://\S+", watch.group(2))
+        if not link:
+            return "watch_usage", {}
+        name = (watch.group(2)[:link.start()] + " " + watch.group(2)[link.end():]).strip()
+        return "watch", {"url": link.group(0), "name": re.sub(r"\s+", " ", name)}
     match = re.match(r"^(赛程|比赛|schedule|预约|reserve)\s*(.*)$", text, re.I)
     if not match:
         return "unknown", {"text": text}

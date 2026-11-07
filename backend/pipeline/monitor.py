@@ -376,6 +376,11 @@ class StreamSession:
     def _event(self, message: str, level: str = "info") -> None:
         label = self.stream.get("label") or stream_status.platform(self.url)
         db.add_monitor_event(self.monitor_id, f"[{label}] {message}", level)
+        if level == "error":
+            from ..integrations.monitor_cards import monitor_cards
+
+            threading.Thread(target=monitor_cards.alert, args=(self.monitor_id, f"【直播间异常】[{label}] {message}"),
+                             daemon=True).start()
 
     def _proxy(self, settings: Dict[str, Any]) -> Optional[str]:
         return config.proxy_or_none(settings) if self.stream.get("proxy") else None

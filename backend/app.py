@@ -23,11 +23,12 @@ from pydantic import BaseModel
 from . import config, db, llm, review, web_auth
 from .integrations import feishu, schedule_card, task_cards
 from .integrations.feishu_ws import FeishuEventClient
+from .integrations.monitor_cards import PLATFORM_LABELS, monitor_cards, replace_stream
 from .integrations.task_cards import cards
-from .pipeline import live, match_sources, monitor, package, stages
+from .pipeline import identify, live, match_sources, monitor, package, stages
 from .pipeline.watcher import MatchWatcher
 from .runner import STAGES, STAGE_KEYS, PipelineRunner, State
-from .sources import bo3, hltv_parse
+from .sources import bo3, hltv_parse, stream_status
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -80,10 +81,12 @@ async def lifespan(_: FastAPI):
     global _main_loop
     _main_loop = loop
     cards.start()
+    monitor_cards.start()
     card_callbacks.start(db.get_settings()["feishu"])
     logger.info("服务已启动，数据目录：%s", config.DATA_DIR)
     yield
     cards.stop()
+    monitor_cards.stop()
     await watcher.stop()
     await runner.stop()
     await run_in_threadpool(live.manager.stop_all)
@@ -571,6 +574,7 @@ async def create_monitor(body: MonitorBody):
     fields["title"] = (fields.get("title") or fields.get("event_name") or "").strip() or "直播间"
     created = db.create_monitor(**fields)
     monitor.manager.wake()
+    monitor_cards.wake()
     return monitor.manager.status(created)
 
 
@@ -644,6 +648,7 @@ async def update_monitor(monitor_id: int, body: MonitorBody):
     fields = _monitor_fields(body)
     updated = db.update_monitor(monitor_id, **fields) if fields else db.get_monitor(monitor_id)
     monitor.manager.wake()
+    monitor_cards.wake()
     return monitor.manager.status(updated)
 
 
@@ -767,6 +772,8 @@ async def _card_action(value: Dict[str, Any], form: Dict[str, Any], operator: st
         db.add_event(task["id"], "在飞书赛程卡片上取消预约")
         await _update_schedule(message_id, view)
         return f"已取消预约 {task['title']}"
+    if action.startswith("monitor_"):
+        return await _monitor_card_action(action, int(value["monitor_id"]), form)
     label = CARD_ACTIONS.get(action)
     if label is None:
         raise HTTPException(400, f"未知操作：{action}")
@@ -808,6 +815,56 @@ async def _card_action(value: Dict[str, Any], form: Dict[str, Any], operator: st
     return message
 
 
+async def _monitor_card_action(action: str, monitor_id: int, form: Dict[str, Any]) -> str:
+    """直播间卡片上的按钮和换链接表单。"""
+    found = _require_monitor(monitor_id)
+    if action == "monitor_on":
+        db.update_monitor(monitor_id, enabled=True)
+        db.add_monitor_event(monitor_id, "在飞书卡片上开始监视")
+        message = "已开始监视"
+    elif action == "monitor_off":
+        db.update_monitor(monitor_id, enabled=False, windows=[])
+        db.add_monitor_event(monitor_id, "在飞书卡片上停止监视")
+        message = "已停止监视"
+    elif action == "monitor_stream":
+        url = str(form.get("url") or "").strip()
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(400, "请填写直播链接")
+        _set_monitor_stream(found, url, form.get("slot"), form.get("proxy"))
+        db.add_monitor_event(monitor_id, f"在飞书卡片上换了直播链接：{url}")
+        message = "已保存直播链接"
+    else:
+        raise HTTPException(400, f"未知操作：{action}")
+    monitor.manager.wake()
+    monitor_cards.wake()
+    return message
+
+
+def _set_monitor_stream(found: Dict[str, Any], url: str, slot: Optional[str] = None,
+                        proxy: Optional[str] = None, **fields: Any) -> Dict[str, Any]:
+    try:
+        streams = monitor.normalize_streams(replace_stream(found["streams"], url, slot, proxy))
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+    return db.update_monitor(found["id"], streams=streams, **fields)
+
+
+def _watch_target(url: str, name: str) -> Optional[Dict[str, Any]]:
+    """「监视 <链接> [赛事名]」加到哪个直播间：同名赛事 → 已经有这条链接的 → 最近开着的 → 没有就新建。"""
+    monitors = db.list_monitors()
+    if name:
+        lowered = name.lower()
+        return next((m for m in monitors if lowered in ((m.get("event_name") or "").lower(), m["title"].lower())
+                     or identify.same_event_name(name, m.get("event_name") or "")), None)
+    key = monitor.stream_key(url)
+    found = next((m for m in monitors if any(monitor.stream_key(s["url"]) == key for s in m["streams"])), None)
+    if found:
+        return found
+    now = time.time()
+    on = sorted((m for m in monitors if monitor.is_on(m, now)), key=lambda m: m["updated_at"], reverse=True)
+    return on[0] if on else None
+
+
 def _on_card_action(value: Dict[str, Any], form: Dict[str, Any], operator: str, message_id: str) -> Optional[str]:
     """长连接线程里调用：把操作交给服务的事件循环执行。"""
     if _main_loop is None:
@@ -847,6 +904,12 @@ async def _handle_command(event: Dict[str, Any]) -> None:
             await reply(schedule_card.HELP_TEXT)
         elif command == "unknown":
             await reply(f"没看懂「{args['text'][:50]}」\n\n{schedule_card.HELP_TEXT}")
+        elif command == "monitors":
+            await reply(await _send_monitor_cards())
+        elif command == "watch_usage":
+            await reply("用法：监视 <直播链接> [赛事名]，例如：监视 https://live.bilibili.com/35 IEM Beijing 2026")
+        elif command == "watch":
+            await reply(await _watch(args["url"], args.get("name") or ""))
         elif command == "reserve_url":
             match_id = hltv_parse.match_id_from_url(args["url"])
             if not match_id:
@@ -862,6 +925,47 @@ async def _handle_command(event: Dict[str, Any]) -> None:
     except Exception as error:
         logger.exception("处理飞书命令出错")
         await reply(f"操作失败：{error}")
+
+
+MONITOR_CARD_LIMIT = 5
+
+
+async def _send_monitor_cards() -> str:
+    """「直播间」：开着的直播间（再补几个最近的）各发一张新卡片到群里。"""
+    now = time.time()
+    monitors = db.list_monitors()
+    if not monitors:
+        return "还没有直播间。发「监视 <直播链接> [赛事名]」新建一个，或者在网页的「直播间」页新建"
+    picked = sorted(monitors, key=lambda m: (not monitor.is_on(m, now), -m["updated_at"]))[:MONITOR_CARD_LIMIT]
+    for found in picked:
+        await run_in_threadpool(monitor_cards.sync, found["id"], True)
+    on = sum(1 for m in monitors if monitor.is_on(m, now))
+    return f"已把 {len(picked)} 个直播间的卡片发到群里（{on} 个正在监视）"
+
+
+async def _watch(url: str, name: str) -> str:
+    """「监视 <链接> [赛事名]」：给直播间加/换链接并开始监视。"""
+    found = _watch_target(url, name)
+    if found is None:
+        title = name or f"{PLATFORM_LABELS.get(stream_status.platform(url), '直播')} 直播间"
+        found = db.create_monitor(title=title, event_name=name or None, streams=[])
+        db.add_monitor_event(found["id"], "在飞书里新建直播间")
+    updated = _set_monitor_stream(found, url, enabled=True)
+    db.add_monitor_event(found["id"], f"在飞书里加了直播链接：{url}")
+    # 同一个直播间换了赛事（B 站主舞台每个赛事都用）：之前开着、也在看这条链接的直播间停掉，免得录两份
+    stopped = []
+    for other in db.list_monitors():
+        if other["id"] != found["id"] and monitor.is_on(other, time.time()) and any(
+                monitor.stream_key(s["url"]) == monitor.stream_key(url) for s in other["streams"]):
+            db.update_monitor(other["id"], enabled=False, windows=[])
+            db.add_monitor_event(other["id"], f"这条链接改由「{updated['title']}」监视，这里停止监视：{url}")
+            stopped.append(other["title"])
+    monitor.manager.wake()
+    monitor_cards.wake()
+    await run_in_threadpool(monitor_cards.sync, found["id"], True)
+    hint = "" if updated.get("event_name") else "；没填赛事名，识别受访者时找不到候选战队，可以在直播间页补上"
+    moved = f"；「{'」「'.join(stopped)}」已停止监视" if stopped else ""
+    return f"已开始监视「{updated['title']}」，共 {len(updated['streams'])} 条链接{moved}{hint}"
 
 
 def _on_bot_message(event: Dict[str, Any]) -> None:

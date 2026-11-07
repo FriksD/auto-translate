@@ -54,12 +54,18 @@ ACTIVE_STATES = (State.RESERVED, State.WATCHING, State.RECORDING, State.INTERVIE
 PRE_RECORDING_STATES = (State.RESERVED, State.WATCHING, State.CANCELLED)
 
 LIVE_STEPS = ["预约", "监视", "录制", "采访", "初稿", "精校"]
+# 直播间监视截下来的采访：截到就有任务，进度从初稿开始
+INTERVIEW_STEPS = ["采访", "初稿", "精校"]
+INTERVIEW_STEP_INDEX = {State.DRAFT: 1, State.QUEUED: 1, State.PROCESSING: 1, State.REVIEW: 2, State.DONE: 3}
 MANUAL_STEPS = ["创建", "处理", "精校"]
 LIVE_STEP_INDEX = {State.RESERVED: 0, State.WATCHING: 1, State.RECORDING: 2, State.INTERVIEW_DETECTING: 3,
                    State.QUEUED: 4, State.PROCESSING: 4, State.REVIEW: 5, State.DONE: 6}
 MANUAL_STEP_INDEX = {State.DRAFT: 0, State.QUEUED: 1, State.PROCESSING: 1, State.REVIEW: 2, State.DONE: 3}
 # 卡片"最新动态"里不显示的流水线流水账
 EVENT_NOISE = ("开始：", "完成：", "加入队列")
+SOURCE_LABELS = {"auto": "自动判定", "camera": "镜头切走", "manual": "人工标注", "timeout": "超时截取"}
+KIND_LABELS = {"just_played": "赛后采访", "between_maps": "图间采访", "upcoming": "赛前采访",
+               "general": "和具体比赛无关"}
 
 
 # ── 卡片内容（纯函数） ─────────────────────────────────────────────────────────
@@ -83,8 +89,20 @@ def _markdown(content: str) -> Dict[str, Any]:
     return {"tag": "markdown", "content": content}
 
 
+def is_interview(task: Dict[str, Any]) -> bool:
+    """直播间监视截下来的采访任务（不是预约比赛出来的）。"""
+    return bool((task.get("context") or {}).get("monitor"))
+
+
 def step_track(task: Dict[str, Any], state: Dict[str, Any]) -> List[Tuple[str, str]]:
     """进度条：[(步骤名, done|current|failed|stopped|todo)]"""
+    if is_interview(task):
+        index = INTERVIEW_STEP_INDEX.get(task["state"])
+        marker = "current"
+        if index is None:
+            index, marker = 1, "failed" if task["state"] == State.FAILED else "stopped"
+        return [(name, "done" if i < index else marker if i == index else "todo")
+                for i, name in enumerate(INTERVIEW_STEPS)]
     live = task["source_type"] == "live"
     steps = LIVE_STEPS if live else MANUAL_STEPS
     status = task["state"]
@@ -120,11 +138,41 @@ def _track_line(track: List[Tuple[str, str]], recording: bool) -> str:
     return " → ".join(parts)
 
 
-def _subtitle(task: Dict[str, Any]) -> str:
-    match = (task.get("context") or {}).get("match") or {}
+def _subtitle(task: Dict[str, Any], state: Optional[Dict[str, Any]] = None) -> str:
+    context = task.get("context") or {}
+    match = context.get("match") or {}
+    if is_interview(task):
+        origin = ((state or {}).get("recording") or {}).get("started_at")
+        interview = (state or {}).get("interview") or {}
+        at = origin + interview["start"] if origin is not None and "start" in interview else task.get("created_at")
+        parts = [match.get("event") or (context.get("monitor") or {}).get("event_name"), _clock(at, with_date=True)]
+        return " · ".join(p for p in parts if p) or f"任务 #{task['id']}"
     start = (match.get("unix_ms") or 0) / 1000 or task.get("match_time")
     parts = [match.get("event"), match.get("format"), _clock(start, with_date=True)]
     return " · ".join(p for p in parts if p) or f"任务 #{task['id']}"
+
+
+def _interview_lines(task: Dict[str, Any], state: Dict[str, Any]) -> List[str]:
+    """采访任务：来自哪个直播间、什么时间，识别出的受访者。"""
+    context = task.get("context") or {}
+    lines = []
+    origin = (state.get("recording") or {}).get("started_at")
+    interview = state.get("interview") or {}
+    if origin is not None and interview:
+        monitor = context.get("monitor") or {}
+        where = f"[{monitor.get('event_name') or '直播间'}]({config.PUBLIC_URL}/monitors/{monitor.get('id')})"
+        lines.append(f"**采访** {where} {_clock(origin + interview['start'])}–{_clock(origin + interview['end'])}"
+                     f"（{SOURCE_LABELS.get(interview.get('source'), interview.get('source') or '')}）")
+    identified = context.get("identified")
+    if identified:
+        who = "、".join(identified.get("interviewees") or []) or "受访者未知"
+        parts = [who + (f"（{identified['team']}）" if identified.get("team") else "")]
+        if identified.get("about_match") in KIND_LABELS:
+            parts.append(KIND_LABELS[identified["about_match"]])
+        if identified.get("opponent"):
+            parts.append(f"对手 {identified['opponent']}")
+        lines.append("**识别** " + " · ".join(parts))
+    return lines
 
 
 def _score_lines(task: Dict[str, Any], state: Dict[str, Any]) -> List[str]:
@@ -248,7 +296,7 @@ def _buttons(task: Dict[str, Any], state: Dict[str, Any], public_review: Optiona
     buttons = []
     if public_review and status in (State.REVIEW, State.DONE):
         buttons.append(_link_button("在线精校", public_review, "primary" if status == State.REVIEW else "default"))
-    if task["source_type"] == "live":
+    if task["source_type"] == "live" and not is_interview(task):
         if status in (State.RESERVED, State.WATCHING):
             buttons += [_button("立即检查", "check", task_id), _button("立即录制", "record", task_id),
                         _button("取消预约", "cancel", task_id, "danger", "停止监视这场比赛，之后不会再录制")]
@@ -271,7 +319,7 @@ def _buttons(task: Dict[str, Any], state: Dict[str, Any], public_review: Optiona
 
 def _stream_form(task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """填直播链接开录 / 换源。"""
-    if task["source_type"] != "live" or task["state"] not in (
+    if task["source_type"] != "live" or is_interview(task) or task["state"] not in (
             State.WATCHING, State.RECORDING, State.INTERVIEW_DETECTING, State.NO_INTERVIEW):
         return None
     return {
@@ -297,10 +345,12 @@ def build_card(task: Dict[str, Any], state: Dict[str, Any], progress: Optional[D
     """
     label, template, tag_color = STATE_STYLE.get(task["state"], (task["state"], "grey", "neutral"))
     recording = task["state"] in (State.RECORDING, State.INTERVIEW_DETECTING)
+    facts = (_interview_lines(task, state) if is_interview(task)
+             else _score_lines(task, state) + _detection_lines(state))
     sections = [
         [_track_line(step_track(task, state), recording)]
         + ([f"<font color='grey'>预约人</font> <at id={reserved_by}></at>"] if reserved_by else []),
-        _score_lines(task, state) + _detection_lines(state) + _status_lines(task, state, progress, names_report, cfg or {}),
+        facts + _status_lines(task, state, progress, names_report, cfg or {}),
         _event_lines(events or []),
     ]
     elements: List[Dict[str, Any]] = []
@@ -323,7 +373,7 @@ def build_card(task: Dict[str, Any], state: Dict[str, Any], progress: Optional[D
         "config": {"update_multi": True, "summary": {"content": f"{label}｜{task['title']}"}},
         "header": {
             "title": _text(task["title"]),
-            "subtitle": _text(_subtitle(task)),
+            "subtitle": _text(_subtitle(task, state)),
             "template": template,
             "text_tag_list": [{"tag": "text_tag", "text": _text(label), "color": tag_color}],
         },
@@ -372,7 +422,7 @@ def ready_to_send(task: Dict[str, Any]) -> bool:
     还没发出的卡片现在该不该发：预约的比赛等比赛开打（或开始录制）；取消的预约就不发了。
     预约后立即抓背景信息时任务短暂处于排队/处理中（阶段 context），也还没开打。
     """
-    if task["source_type"] != "live":
+    if task["source_type"] != "live" or is_interview(task):
         return True
     if task["state"] not in PRE_RECORDING_STATES and task.get("stage") != "context":
         return True
