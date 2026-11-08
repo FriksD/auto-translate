@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<!-- 投稿页的模拟：DOM 结构照抄真实页面的关键部分，Quill 用同一大版本（1.x），上传是假的（不联网）。
+     只用来测插件的填写逻辑；真实网站的上传接口、裁剪弹窗行为要在真实页面上确认。 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>完美世界电竞开放平台（模拟）</title>
+<link href="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.snow.css" rel="stylesheet">
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  .el-input__inner { width: 600px; padding: 8px; }
+  .ql-editor { min-height: 300px; }
+  .m-imguploader { width: 240px; min-height: 100px; border: 1px dashed #aaa; margin: 6px 0; }
+  .m-imguploader img { width: 100%; }
+  .el-dialog__wrapper { position: fixed; inset: 0; background: rgba(0,0,0,.4); }
+  .el-dialog { background: #fff; width: 300px; margin: 20vh auto; padding: 20px; }
+</style>
+</head>
+<body>
+<noscript><strong>We're sorry but 完美世界电竞开放平台 doesn't work properly without JavaScript enabled.</strong></noscript>
+<div id="app">
+  <div class="el-breadcrumb app-breadcrumb"><span class="no-redirect"> 新闻内容 </span> &gt; <span class="no-redirect"> CSGO 新闻详细 </span></div>
+  <div class="g-container g-addnews">
+    <p class="m-titi">标题</p>
+    <div class="el-input"><input type="text" placeholder="请输入标题" class="el-input__inner"></div>
+    <p class="m-titi">摘要</p>
+    <div class="el-input"><input type="text" placeholder="请输入摘要" class="el-input__inner"></div>
+    <p class="m-titi">内容</p>
+    <div class="g-quill"><div class="quill-editor"><div id="editor"></div></div>
+      <div class="quill-img-uploader"><div class="el-upload"><input type="file" name="file" multiple class="el-upload__input" hidden></div></div>
+    </div>
+    <div class="el-card"><div class="el-card__body">
+      <p class="m-titi">大预览图（702*300） <button type="button" class="el-button sync" style="display: none;"><span> 同步 </span></button></p>
+      <div class="m-imguploader big"><div class="el-upload"><input type="file" name="imgFile" class="el-upload__input"></div></div>
+      <p class="m-titi">小预览图（184*138）</p>
+      <div class="m-imguploader supload"><div class="el-upload"><input type="file" name="imgFile" class="el-upload__input"></div></div>
+    </div></div>
+  </div>
+  <div class="el-dialog__wrapper crop" style="display: none;"><div role="dialog" aria-label="图片裁剪" class="el-dialog">
+    图片裁剪 <span class="size"></span>
+    <button type="button" class="el-button el-button--default"><span>取消</span></button>
+    <button type="button" class="el-button el-button--primary ok"><span>确定裁剪</span></button>
+  </div></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.min.js"></script>
+<script>
+  // 记录 v-model 会收到的 input 事件
+  window.modelEvents = [];
+  document.querySelectorAll(".el-input__inner").forEach((input) =>
+    input.addEventListener("input", () => modelEvents.push([input.placeholder, input.value])));
+
+  const quill = new Quill("#editor", { theme: "snow" });
+  const fakeUpload = (file) => new Promise((resolve) => setTimeout(() =>
+    resolve(`https://cdn.wmpvp.com/appadmin/FAKE-${Date.now()}-${encodeURIComponent(file.name)}`), 400));
+
+  // 正文上传：插在光标处（真实网站的写法未知，这里按最常见的 getSelection(true)）
+  document.querySelector(".quill-img-uploader input").addEventListener("change", async (event) => {
+    const url = await fakeUpload(event.target.files[0]);
+    const range = quill.getSelection(true);
+    quill.insertEmbed(range.index, "image", url + "?x-oss-process=image/resize,m_fixed,h_534,w_800", "user");
+    quill.setSelection(range.index + 1, 0);
+  });
+
+  // 大预览图：先弹裁剪框，确定后上传
+  let pending = null;
+  document.querySelector(".big input").addEventListener("change", async (event) => {
+    pending = event.target.files[0];
+    const bitmap = await createImageBitmap(pending);
+    window.croppedSize = [bitmap.width, bitmap.height];
+    document.querySelector(".crop .size").textContent = `${bitmap.width}×${bitmap.height}`;
+    document.querySelector(".crop").style.display = "";
+  });
+  document.querySelector(".crop .ok").addEventListener("click", async () => {
+    document.querySelector(".crop").style.display = "none";
+    const url = await fakeUpload(pending);
+    setImage(".big", url);
+    document.querySelector(".sync").style.display = "";
+  });
+  document.querySelector(".sync").addEventListener("click", () =>
+    setImage(".supload", document.querySelector(".big img").getAttribute("src")));
+  document.querySelector(".supload input").addEventListener("change", async (event) =>
+    setImage(".supload", await fakeUpload(event.target.files[0])));
+
+  function setImage(selector, url) {
+    const upload = document.querySelector(`${selector} .el-upload`);
+    upload.querySelector("img")?.remove();
+    const img = document.createElement("img");
+    img.src = url;
+    upload.prepend(img);
+  }
+</script>
+</body>
+</html>

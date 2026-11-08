@@ -2,7 +2,7 @@
 投稿信息：推荐标题、摘要、封面候选。
 
 初稿发到飞书之后在后台生成（不耽误出初稿），只存在任务目录里，在线精校页上看、改、一键复制；
-飞书里在定稿时才发：Word（摘要作为导语放在正文最前面）、选用的标题、封面候选图。
+定稿时打成投稿包（zip）发到飞书：浏览器插件（browser-extension/）读它，在投稿网站上自动填写。
 
 - 标题和摘要：比赛事实（赛事、赛段、比分、胜负）由代码从背景信息和直播比分算好，LLM 只负责
   从中文稿里提炼观点、套用范例格式。标题范例来自设置，定稿时选用的标题自动加进去。
@@ -14,9 +14,11 @@
                   event_zh, titles, title（选用的标题）, summary, covers: [{file, source, label}], warnings}
   covers/        封面候选图片
   stills/        直播采访期间截的高清画面（live.py）；视频任务截的帧也放在这里
+  *_投稿包.zip    定稿时生成的投稿包，格式见 browser-extension/README.md
 """
 import json
 import logging
+import zipfile
 import os
 import re
 import subprocess
@@ -32,6 +34,7 @@ from ..integrations import feishu
 from ..integrations.task_cards import cards, review_url
 from ..sources import hltv_parse
 from . import prompts
+from .docx_export import parse_paragraphs
 from .names import tighten_cjk_spacing
 
 logger = logging.getLogger(__name__)
@@ -496,14 +499,66 @@ def generate(task_id: int) -> Dict[str, Any]:
     return package
 
 
-def send_covers(task_id: int, package: Dict[str, Any]) -> None:
-    """定稿时把封面候选图发到卡片的话题里（标题和 Word 由定稿流程发）。"""
-    cover_dir = config.task_dir(task_id) / "covers"
-    for cover in package.get("covers") or []:
-        try:
-            cards.send_image(task_id, cover_dir / cover["file"])
-        except Exception as error:
-            logger.warning("任务 %s 封面 %s 发送失败：%s", task_id, cover["file"], error)
+# ── 投稿包 ───────────────────────────────────────────────────────────────────
+
+SUBMISSION_FORMAT = "wmpvp-news"
+SUBMISSION_VERSION = 1
+SUBMISSION_SUFFIX = "_投稿包.zip"
+
+
+def article(task_id: int, package: Dict[str, Any], draft: str, covers: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """投稿包里的 article.json。正文和 Word 的排法一致：导语（摘要）、配图（插件上选的封面）、Q/A。"""
+    summary = package.get("summary") or ""
+    body: List[Dict[str, Any]] = [{"type": "p", "text": summary}] if summary else []
+    body.append({"type": "image"})
+    body += [{"type": kind, "text": text} for kind, text in parse_paragraphs(draft)]
+    title = chosen_title(package)
+    warnings = list(package.get("warnings") or [])
+    if not title:
+        warnings.append("没有选用的标题")
+    return {
+        "format": SUBMISSION_FORMAT,
+        "version": SUBMISSION_VERSION,
+        "game": "csgo",
+        "title": title,
+        "summary": summary,
+        "body": body,
+        "covers": [{"file": f"covers/{c['file']}", "label": c.get("label") or ""} for c in covers],
+        "cover": f"covers/{covers[0]['file']}" if covers else None,
+        "warnings": warnings,
+        "source": {"task_id": task_id, "built_at": datetime.now(prompts.BEIJING).strftime("%Y-%m-%d %H:%M:%S")},
+    }
+
+
+def build_submission(task_id: int) -> Path:
+    """打投稿包：article.json、封面候选、Word（给要手工投稿的时候用）。返回 zip 路径；旧的投稿包删掉。"""
+    from . import stages
+
+    task = db.get_task(task_id)
+    if task is None:
+        raise RuntimeError("任务不存在")
+    directory = config.task_dir(task_id)
+    info = load(task_id)
+    covers = [c for c in info.get("covers") or [] if (directory / "covers" / c["file"]).is_file()]
+    data = article(task_id, info, stages.read_text(task_id, "draft_zh.txt"), covers)
+    docx = stages.find_docx(task_id)
+    path = directory / (Path(stages.docx_filename(task)).stem + SUBMISSION_SUFFIX)
+    for old in directory.glob("*" + SUBMISSION_SUFFIX):
+        old.unlink()
+    partial = path.with_suffix(".part")
+    with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("article.json", json.dumps(data, ensure_ascii=False, indent=1))
+        for cover in covers:  # 图片本来就压缩过
+            archive.write(directory / "covers" / cover["file"], f"covers/{cover['file']}", zipfile.ZIP_STORED)
+        if docx:
+            archive.write(docx, docx.name)
+    partial.replace(path)
+    return path
+
+
+def find_submission(task_id: int) -> Optional[Path]:
+    files = sorted(config.task_dir(task_id).glob("*" + SUBMISSION_SUFFIX))
+    return files[0] if files else None
 
 
 class PackageService:

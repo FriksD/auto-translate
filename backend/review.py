@@ -5,9 +5,9 @@
   别人已经改过这一段就返回冲突，不会互相覆盖。
 - 英文清洗稿只作参考；按转写的时间戳给每段配上音频位置，点一下从这段开始听。
 - 画面用直播录制时每隔几秒存的那些帧，跟着音频进度切换，用来分辨谁在说话。
-- 任何一个人都可以定稿：重新生成 Word，标记完成，发到任务卡片的话题里。
-- 投稿信息（推荐标题、摘要、封面候选，见 pipeline/package.py）也在这页上改选、复制；定稿时选用的
-  标题和摘要发到话题里，并加进设置里的范例。
+- 任何一个人都可以定稿：重新生成 Word 和投稿包，标记完成，把投稿包发到任务卡片的话题里。
+- 投稿信息（推荐标题、摘要、封面候选，见 pipeline/package.py）也在这页上改选、复制；定稿时打进投稿包
+  （浏览器插件读它自动填投稿页），选用的标题和摘要加进设置里的范例。
 
 精校记录存在任务目录的 review.json：
   draft_mtime   上次由精校页写入 draft_zh.txt 的时间；文件被别处改过就重置下面的对应关系
@@ -306,7 +306,7 @@ def review_audio(task_id: int) -> Path:
 
 
 def finalize(task_id: int, user: Dict[str, Any]) -> Dict[str, Any]:
-    """定稿：重新生成 Word，标记完成，发到任务卡片的话题里。"""
+    """定稿：重新生成 Word 和投稿包，标记完成，把投稿包发到任务卡片的话题里。"""
     task = db.get_task(task_id)
     if task is None:
         raise HTTPException(404, "任务不存在")
@@ -315,27 +315,22 @@ def finalize(task_id: int, user: Dict[str, Any]) -> Dict[str, Any]:
     with _locks[task_id]:
         stages.stage_export(task_id, with_lead=True)
         paragraphs, review = _load(task_id)
-        first_time = not review.get("finalized")
         review["finalized"] = {"by": user["name"], "at": time.time()}
         _save(task_id, paragraphs, review)
+        submission = package.build_submission(task_id)
     db.update_task(task_id, state=State.DONE, error=None)
     db.add_event(task_id, f"{user['name']} 在线精校后定稿")
     info = package.load(task_id)
-    title, summary = package.chosen_title(info), info.get("summary") or ""
-    package.remember_examples(title, summary)
+    package.remember_examples(package.chosen_title(info), info.get("summary") or "")
     sent = False
     if db.get_settings()["feishu"].get("enabled"):
         try:
-            extra = "，导语在正文最前面，标题在 Word 后面" if title or summary else ""
-            cards.alert(task_id, "定稿", f"{user['name']} 已定稿，Word 见下方{extra}")
-            cards.send_file(task_id, stages.find_docx(task_id))
-            if title:
-                cards.send_text(task_id, title)
-            if first_time:  # 重新定稿不再重发封面
-                package.send_covers(task_id, info)
+            cards.alert(task_id, "定稿", f"{user['name']} 已定稿，投稿包见下方：拖到投稿页右下角的「投稿包」按钮上自动填写"
+                                       "（标题、摘要、正文、预览图；包里也有 Word）")
+            cards.send_file(task_id, submission)
             sent = True
         except Exception as error:
-            db.add_event(task_id, f"定稿的 Word 发送到飞书失败：{error}", level="warning")
+            db.add_event(task_id, f"定稿的投稿包发送到飞书失败：{error}", level="warning")
     cards.wake()
     return {**payload(task_id), "sent": sent}
 
@@ -418,6 +413,18 @@ async def get_cover(task_id: int, name: str, _: Dict[str, Any] = Depends(current
     if not package.COVER_NAME.match(name) or not path.is_file():
         raise HTTPException(404, "图片不存在")
     return FileResponse(path, headers={"Cache-Control": "max-age=60"})
+
+
+@router.get("/api/review/{task_id}/submission")
+async def get_submission(task_id: int, _: Dict[str, Any] = Depends(current_user)):
+    """下载投稿包：按当前的稿子和投稿信息重新打（定稿后又改了也是最新的）。"""
+    if not (config.task_dir(task_id) / DRAFT).exists():
+        raise HTTPException(409, "还没有中文初稿")
+    try:
+        path = await run_in_threadpool(package.build_submission, task_id)
+    except RuntimeError as error:
+        raise HTTPException(404, str(error))
+    return FileResponse(path, media_type="application/zip", filename=path.name)
 
 
 @router.get("/api/review/{task_id}/audio")

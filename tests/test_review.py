@@ -1,4 +1,5 @@
 """在线精校：公网访问边界、飞书登录会话、段落编辑与冲突、音频对齐、接口的测试。"""
+import io
 import json
 import sys
 import tempfile
@@ -192,28 +193,62 @@ class ReviewApiTest(unittest.TestCase):
         self.assertEqual(result["finalized"]["by"], "本机")
         self.assertIsNotNone(next(config.task_dir(self.task["id"]).glob("*.docx"), None))
 
-    def test_finalize_puts_lead_in_word_and_sends_title_and_covers(self):
+    def test_finalize_sends_submission_package(self):
+        import zipfile
         from docx import Document
         from backend.pipeline import package
 
         directory = config.task_dir(self.task["id"])
+        (directory / "covers").mkdir(exist_ok=True)
+        (directory / "covers" / "interview_1.jpg").write_bytes(b"jpeg")
         package.save(self.task["id"], {"status": "done", "titles": ["A赛后采访：甲", "A赛后采访：乙"], "title": "A赛后采访：乙",
                                        "summary": "IEM北京站今日继续，TYLOO以2-0击败9z。（听译，可能存在出入）",
-                                       "covers": [{"file": "c1.jpg", "source": "still", "label": ""}]})
+                                       "covers": [{"file": "interview_1.jpg", "source": "interview", "label": "采访画面"},
+                                                  {"file": "player_1.jpg", "source": "player", "label": "已删掉的图"}]})
         settings = db.get_settings()
         settings["feishu"]["enabled"] = True
         db.save_settings(settings)
         sent = []
-        with unittest.mock.patch.object(review.cards, "alert", side_effect=lambda *a, **k: sent.append(("alert", a[1]))),                 unittest.mock.patch.object(review.cards, "send_file", side_effect=lambda *a, **k: sent.append(("file",))),                 unittest.mock.patch.object(review.cards, "send_text", side_effect=lambda _, t: sent.append(("text", t))),                 unittest.mock.patch.object(package.cards, "send_image", side_effect=lambda _, p: sent.append(("image", p.name))):
+        with unittest.mock.patch.object(review.cards, "alert", side_effect=lambda *a, **k: sent.append(("alert", a[1]))),                 unittest.mock.patch.object(review.cards, "send_file", side_effect=lambda _, p: sent.append(("file", p.name))),                 unittest.mock.patch.object(review.cards, "send_text", side_effect=lambda _, t: sent.append(("text", t))):
             self.local.post(self.url("/finalize"))
-            self.local.post(self.url("/finalize"))  # 重新定稿：不再重发封面
-        self.assertEqual(sent[:4], [("alert", "定稿"), ("file",), ("text", "A赛后采访：乙"), ("image", "c1.jpg")])
-        self.assertEqual(sum(1 for item in sent if item[0] == "image"), 1)
-        # 摘要不再单独发，而是 Word 里的导语
-        self.assertFalse(any(item[0] == "text" and "TYLOO" in item[1] for item in sent))
+            self.local.post(self.url("/finalize"))
+        # 只发投稿包，标题、摘要、封面都不单独发
+        self.assertEqual([kind for kind, _ in sent], ["alert", "file", "alert", "file"])
+        self.assertTrue(sent[1][1].endswith("_投稿包.zip"))
+        self.assertEqual(len(list(directory.glob("*_投稿包.zip"))), 1)
+
+        archive = zipfile.ZipFile(next(directory.glob("*_投稿包.zip")))
+        names = archive.namelist()
+        self.assertIn("covers/interview_1.jpg", names)
+        self.assertNotIn("covers/player_1.jpg", names)
+        self.assertTrue(any(name.endswith(".docx") for name in names))
+        article = json.loads(archive.read("article.json"))
+        self.assertEqual((article["format"], article["version"], article["game"]), ("wmpvp-news", 1, "csgo"))
+        self.assertEqual(article["title"], "A赛后采访：乙")
+        self.assertEqual(article["summary"], "IEM北京站今日继续，TYLOO以2-0击败9z。（听译，可能存在出入）")
+        self.assertEqual(article["body"], [
+            {"type": "p", "text": "IEM北京站今日继续，TYLOO以2-0击败9z。（听译，可能存在出入）"},
+            {"type": "image"},
+            {"type": "q", "text": "Q：你好吗？"},
+            {"type": "a", "text": "A：很好。"},
+        ])
+        self.assertEqual(article["cover"], "covers/interview_1.jpg")
+        # Word 里摘要仍然是导语
         docx = Document(str(next(directory.glob("*.docx"))))
         self.assertEqual(docx.paragraphs[0].text, "IEM北京站今日继续，TYLOO以2-0击败9z。（听译，可能存在出入）")
         self.assertFalse(docx.paragraphs[0].runs[0].bold)
+
+    def test_download_submission(self):
+        import zipfile
+
+        response = self.public.get(self.url("/submission"))
+        self.assertEqual(response.status_code, 401)
+        response = self.local.get(self.url("/submission"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/zip")
+        article = json.loads(zipfile.ZipFile(io.BytesIO(response.content)).read("article.json"))
+        self.assertEqual(article["cover"], None)
+        self.assertIn("没有选用的标题", article["warnings"])
 
     def test_payload_split_answer_stays_aligned(self):
         directory = config.task_dir(self.task["id"])

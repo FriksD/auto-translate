@@ -1,7 +1,7 @@
 // 在线精校页：手机上在飞书里打开，听采访音频、对照英文改中文稿，任何一人都可以定稿
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, Copy, Loader2, Pause, Play, RefreshCw, RotateCcw, RotateCw, Trash2 } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, Copy, Download, Loader2, Pause, Play, RefreshCw, RotateCcw, RotateCw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { formatSeconds, STATE_COLORS, STATE_LABELS } from '@/lib/api'
@@ -127,12 +127,12 @@ export function ReviewPage() {
   }, [id, load])
 
   const finalize = async () => {
-    if (!window.confirm('定稿：用当前的中文稿重新生成 Word（摘要作为导语放在最前面），标记完成，并把 Word、标题和封面发到飞书群里？')) return
+    if (!window.confirm('定稿：用当前的中文稿和投稿信息打成投稿包（标题、摘要、正文、封面候选、Word），标记完成，并把投稿包发到飞书群里？')) return
     setFinalizing(true)
     try {
       const result = await call<ReviewData>('POST', `/api/review/${id}/finalize`)
       setData((previous) => ({ ...result, user: previous?.user }))
-      setToast(result.sent ? '已定稿，Word 已发到群里' : '已定稿')
+      setToast(result.sent ? '已定稿，投稿包已发到群里' : '已定稿')
     } catch (e) {
       setToast(`定稿失败：${(e as Error).message}`)
     } finally {
@@ -191,9 +191,20 @@ export function ReviewPage() {
                 {data.finalized.by} {clock(data.finalized.at)} 已定稿{changedAfterFinal ? '，之后又有修改' : ''}
               </span>
             ) : (
-              <span>{data.user?.name ? `${data.user.name}，` : ''}改完点定稿，Word 会发到群里</span>
+              <span>{data.user?.name ? `${data.user.name}，` : ''}改完点定稿，投稿包会发到群里</span>
             )}
           </div>
+          {data.finalized && (
+            <a
+              href={`/api/review/${id}/submission`}
+              download
+              title="按当前的稿子重新打包下载；拖到投稿页右下角的「投稿包」按钮上自动填写"
+              className="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent"
+            >
+              <Download className="mr-1 h-4 w-4" />
+              投稿包
+            </a>
+          )}
           <Button size="sm" disabled={finalizing || !data.editable} onClick={finalize}>
             {finalizing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1 h-4 w-4" />}
             {data.finalized ? '重新定稿' : '定稿'}

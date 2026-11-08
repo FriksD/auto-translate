@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "完美电竞投稿助手",
+  "version": "0.1.0",
+  "description": "把定稿导出的投稿包（zip）拖到投稿页上，自动填写标题、摘要、正文，上传正文配图和预览图。",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["zip.js", "content.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ]
+}
