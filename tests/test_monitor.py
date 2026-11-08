@@ -156,20 +156,36 @@ class StepDetectionTest(unittest.TestCase):
         self.assertIsNone(det["active"]["pending_end"])
 
     def test_next_interview_splits_immediately(self):
-        # 一个接一个采访：第二个人开始就确定第一段结束，镜头一直是采访画面也不影响
+        # 中间隔了别的内容的下一段采访：第二段开始就确定第一段结束，镜头一直是采访画面也不影响
         runs = [{"start": 90, "end": 700, "open": True}]
         det, caps, _ = monitor.step_detection(
-            {}, [iv(100, 300, True), iv(305, names=("apEX",))], runs, 350, 0)
+            {}, [iv(100, 300, True), iv(400, names=("apEX",))], runs, 450, 0)
         self.assertEqual(len(caps), 1)
         self.assertEqual((caps[0]["start"], caps[0]["end"]), (100, 300))
-        self.assertEqual(det["trigger_at"], 305)
+        self.assertEqual(det["trigger_at"], 400)
         self.assertTrue(det["recheck"])
         # 下一次：截过的那段不再出现在结果里（在 floor 之前），开始跟踪第二个人
         det, caps, events = monitor.step_detection(
-            det, [iv(100, 300, True), iv(305, names=("apEX",))], runs, 420, 0)
+            det, [iv(100, 300, True), iv(400, names=("apEX",))], runs, 520, 0)
         self.assertEqual(caps, [])
-        self.assertEqual(det["active"]["start"], 305)
+        self.assertEqual(det["active"]["start"], 400)
         self.assertEqual(det["active"]["interviewees"], ["apEX"])
+
+    def test_back_to_back_players_are_one_interview(self):
+        # 冠军采访挨个问：前一个人答完马上问下一个，合成一段，受访者按顺序合并
+        lines = [{"start": t, "end": t + 5, "text": "x"} for t in range(100, 400, 10)]
+        answer = {"interviews": [
+            {"start": "01:40", "end": "02:30", "ended": True, "interviewees": ["Spinx"], "team": "MOUZ"},
+            {"start": "02:40", "end": "03:30", "ended": True, "interviewees": ["xertioN"], "team": "MOUZ"},
+            {"start": "03:40", "ended": False, "interviewees": ["xelex", "spinx"], "team": None},
+        ]}
+        merged = monitor.parse_interviews(answer, lines)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["interviewees"], ["Spinx", "xertioN", "xelex"])
+        self.assertEqual((merged[0]["start"], merged[0]["end"], merged[0]["ended"]), (100, None, False))
+        det, caps, _ = monitor.step_detection({}, merged, [], 400, 0)
+        self.assertEqual(caps, [])
+        self.assertEqual(det["active"]["interviewees"], ["Spinx", "xertioN", "xelex"])
 
     def test_camera_still_on_blocks_end(self):
         runs = [{"start": 95, "end": 600, "open": True}]
@@ -177,11 +193,18 @@ class StepDetectionTest(unittest.TestCase):
         det, caps, _ = monitor.step_detection(det, [iv(100, 400, True)], runs, 660, 0)
         self.assertEqual(caps, [])
 
-    def test_camera_cut_away_captures(self):
+    def test_camera_cut_away_skips_second_check(self):
         runs = [{"start": 95, "end": 420, "open": False}]
-        det, caps, _ = monitor.step_detection({}, [iv(100)], runs, 500, 0)
+        det, caps, _ = monitor.step_detection({}, [iv(100, 410, True)], runs, 500, 0)
         self.assertEqual(len(caps), 1)
         self.assertEqual((caps[0]["start"], caps[0]["end"], caps[0]["source"]), (95, 420, "camera"))
+
+    def test_camera_cut_away_alone_does_not_end(self):
+        # 中途切机位：镜头段断了，但转写认为采访还在继续，不截
+        runs = [{"start": 95, "end": 200, "open": False}]
+        det, caps, _ = monitor.step_detection({}, [iv(100)], runs, 500, 0)
+        self.assertEqual(caps, [])
+        self.assertEqual(det["active"]["start"], 100)
 
     def test_recorded_feature_is_ignored_and_retracts(self):
         det, _, _ = monitor.step_detection({}, [iv(100)], [], 300, 0)

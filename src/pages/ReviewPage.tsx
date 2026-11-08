@@ -605,7 +605,9 @@ function ParagraphEditor({ index, paragraph, showEnglish, disabled, active, onSe
     }
   }
 
-  const kind = /^\s*[Qq]\s*[:：]/.test(text) ? 'Q' : /^\s*[Aa]\s*[:：]/.test(text) ? 'A' : ''
+  // 多人采访的回答以选手名开头（xertioN：），按回答显示
+  const speaker = /^\s*([A-Za-z0-9][A-Za-z0-9_.|!-]{0,23})\s*[:：]/.exec(text)?.[1] ?? ''
+  const kind = /^[Qq]$/.test(speaker) ? 'Q' : /^[Aa]$/.test(speaker) ? 'A' : speaker
 
   return (
     <div className={cn('rounded-lg border p-3 transition-colors', active && 'border-primary/60 bg-primary/[0.03]')}>

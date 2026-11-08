@@ -3,7 +3,7 @@
 
 格式要求：
 - 主持人提问段落以「Q：」开头，整段加粗
-- 选手回答段落以「A：」开头，不加粗
+- 选手回答段落以「A：」开头，不加粗；多人采访的回答以选手名开头（「xertioN：」），同样不加粗
 - 全文小四（12pt），字体保持 Word 默认，其余任何地方都不加粗
 - 有导语（投稿摘要）时放在正文最前面，单独一段，不加粗
 """
@@ -17,6 +17,8 @@ from docx.shared import Cm, Pt
 
 QUESTION = re.compile(r"^\s*[Qq]\s*[:：]\s*")
 ANSWER = re.compile(r"^\s*[Aa]\s*[:：]\s*")
+# 多人采访的回答前缀：选手名（HLTV 写法只有英文、数字和少数符号），中文段落不会误判
+SPEAKER = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9_.|!\-]{0,23})\s*[:：]\s*")
 FONT_SIZE = Pt(12)  # 小四
 
 
@@ -31,6 +33,9 @@ def parse_paragraphs(text: str) -> List[Tuple[str, str]]:
             paragraphs.append(("q", "Q：" + QUESTION.sub("", line, count=1)))
         elif ANSWER.match(line):
             paragraphs.append(("a", "A：" + ANSWER.sub("", line, count=1)))
+        elif SPEAKER.match(line):
+            name = SPEAKER.match(line).group(1)
+            paragraphs.append(("a", f"{name}：" + SPEAKER.sub("", line, count=1)))
         else:
             paragraphs.append(("p", line))
     return paragraphs

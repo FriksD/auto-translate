@@ -7,6 +7,7 @@ from docx import Document
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from backend.pipeline import prompts
 from backend.pipeline.docx_export import export_docx, parse_paragraphs
 
 
@@ -16,6 +17,21 @@ class DocxExportTest(unittest.TestCase):
             parse_paragraphs("q: 问题\n\n A:回答\n补充段落"),
             [("q", "Q：问题"), ("a", "A：回答"), ("p", "补充段落")],
         )
+
+    def test_named_answers_for_several_interviewees(self):
+        self.assertEqual(
+            parse_paragraphs("Q：问 Spinx\nSpinx: 回答\nxertioN：另一个回答\n我想说：不是名字"),
+            [("q", "Q：问 Spinx"), ("a", "Spinx：回答"), ("a", "xertioN：另一个回答"), ("p", "我想说：不是名字")],
+        )
+
+    def test_group_interview_prompts_name_the_answers(self):
+        group = {"identified": {"interviewees": ["Spinx", "xertioN"]}}
+        self.assertIn('Never write "A:"', prompts.clean_format(group))
+        self.assertIn("A: <answer", prompts.clean_format({"identified": {"interviewees": ["Spinx"]}}))
+        english = "Q: Spinx?\n\nSpinx: Yes.\n\nQ: And you?\n\nxertioN: Sure."
+        self.assertEqual(prompts.answer_speakers(english), ["Spinx", "xertioN"])
+        self.assertIn("不要写成「A：」", prompts.write_format(english))
+        self.assertIn("A：<选手回答", prompts.write_format("Q: hi\n\nA: yes"))
 
     def test_question_bold_answer_plain_12pt(self):
         with tempfile.TemporaryDirectory() as tmp:

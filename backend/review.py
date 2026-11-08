@@ -43,7 +43,8 @@ ENGLISH = "clean_en.txt"
 REVIEW_FILE = "review.json"
 AUDIO_FILE = "review_audio.m4a"
 FRAME_NAME = re.compile(r"^f_\d{8}_\d{6}\.jpg$")
-PREFIX = re.compile(r"^\s*[QqAa]\s*[:：]\s*")
+# Q: / A: / 多人采访的「选手名:」（和 docx_export.SPEAKER 一致）
+PREFIX = re.compile(r"^\s*(?:[QqAa]|[A-Za-z0-9][A-Za-z0-9_.|!\-]{0,23})\s*[:：]\s*")
 WORD = re.compile(r"[a-z0-9']+")
 BUSY_STATES = (State.QUEUED, State.PROCESSING)
 # review.json 里 en_index 的算法版本：2 = 按问答块对应（1 是按段落序号，译稿拆段时会错位）
@@ -76,7 +77,7 @@ def fingerprint(paragraph: str) -> str:
 
 def qa_blocks(paragraphs: List[str]) -> List[int]:
     """
-    每段属于第几个问答：Q:/A: 开头的段落开始新的一问或一答，没有前缀的段落接着上一问/答
+    每段属于第几个问答：Q:/A:（或选手名:）开头的段落开始新的一问或一答，没有前缀的段落接着上一问/答
     （译稿常把一段长回答拆成几段，按段落序号一一对应就会错位）。
     """
     result, current = [], -1

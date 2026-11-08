@@ -109,6 +109,10 @@ class WhisperService:
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=500),
             condition_on_previous_text=False,
+            # 自动检测语言时按前 10 个 30 秒窗口投票（阈值 1 = 不提前停）：默认只看第一个窗口，
+            # IEM 北京冠军采访开头是 30 秒中文主持，整段 16 分钟英文采访被当成中文转写（译成了中文）
+            language_detection_segments=10,
+            language_detection_threshold=1.0,
         )
 
         total_duration = info.duration or 0

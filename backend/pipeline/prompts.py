@@ -4,6 +4,7 @@
 第一步（clean）：英文清洗——修正 ASR 错误、统一选手名、整理成 Q/A 问答稿。
 第二步（write）：中文成稿——翻译润色为中文电竞媒体风格的 Q：/A： 问答稿。
 """
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -129,6 +130,41 @@ def format_background(context: Dict[str, Any]) -> str:
     return "\n".join(parts) if parts else "（无）"
 
 
+def several_interviewees(context: Dict[str, Any]) -> List[str]:
+    """识别出的受访者（两人以上才算多人采访，否则返回空）。"""
+    names = ((context or {}).get("identified") or {}).get("interviewees") or []
+    return names if len(names) >= 2 else []
+
+
+# 英文稿里以选手名开头的回答（多人采访），和 docx_export.SPEAKER 一致
+NAMED_ANSWER = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9_.|!\-]{0,23})\s*:", re.M)
+
+
+def answer_speakers(clean_text: str) -> List[str]:
+    """英文稿里的回答人（Q、A 以外的前缀），按出现顺序去重。"""
+    names: List[str] = []
+    for name in NAMED_ANSWER.findall(clean_text):
+        if name.upper() not in ("Q", "A") and name not in names:
+            names.append(name)
+    return names
+
+
+def clean_format(context: Dict[str, Any]) -> str:
+    names = several_interviewees(context)
+    if names:
+        return f"""This is a group interview: several players answer ({', '.join(names)} detected from the broadcast; the list may be incomplete or misspelled).
+Output format — plain text, no markdown:
+Q: <interviewer question, one paragraph>
+<player name>: <that player's answer, one paragraph; keep the whole answer in one paragraph>
+(blank line between each question and answer)
+Start every answer with the canonical name of the player or coach who gives it, e.g. "xertioN: Super happy...". Never write "A:". The question usually says who it is for ("what about you, Spinx?", "XertioN, can you come here?"); when two players answer one question, write two answers, one per player."""
+    return """Output format — plain text, no markdown:
+Q: <interviewer question, one paragraph>
+A: <answer, one paragraph; keep the whole answer in one paragraph>
+(blank line between each Q and A)
+If it turns out several players or coaches answer in this interview, start each answer with the speaker's canonical name instead of "A", e.g. "xertioN: <answer>"."""
+
+
 def build_clean_prompt(transcript: Dict[str, Any], context: Dict[str, Any],
                        canonical_names: List[str], aliases: Dict[str, str]) -> str:
     alias_lines = "\n".join(f"- {a} → {t}" for a, t in aliases.items()) or "(none)"
@@ -141,10 +177,7 @@ Your job:
 4. Mark words you cannot recover with [?].
 5. If the interview is interpreted (e.g. a translator relays a Russian answer), keep only the English answer.
 
-Output format — plain text, no markdown:
-Q: <interviewer question, one paragraph>
-A: <answer, one paragraph; keep the whole answer in one paragraph>
-(blank line between each Q and A)
+{clean_format(context)}
 If there are no interview contents at all, output exactly: NO_INTERVIEW
 
 Name table (canonical spellings, from HLTV):
@@ -158,6 +191,19 @@ Raw transcript:
 """
 
 
+def write_format(clean_text: str) -> str:
+    speakers = answer_speakers(clean_text)
+    if speakers:
+        return f"""这是多人采访（{'、'.join(speakers)}），英文稿里每段回答以回答人的名字开头。输出格式严格如下，不要使用任何 markdown 符号，不要标题、导语或注释：
+Q：<主持人问题，一段>
+<选手名>：<这位选手的回答，一段>
+回答人的名字照抄英文稿（例如「xertioN：超级开心……」），不要写成「A：」。每个问题与回答之间空一行。回答很长时可以按意群拆成多段，后续段落不加前缀。"""
+    return """输出格式严格如下，不要使用任何 markdown 符号，不要标题、导语或注释：
+Q：<主持人问题，一段>
+A：<选手回答，一段>
+每个 Q 与 A 之间空一行。回答很长时可以按意群拆成多段，后续段落不加前缀。"""
+
+
 def build_write_prompt(clean_text: str, context: Dict[str, Any], canonical_names: List[str],
                        terms: Dict[str, str], notes: str, extra_instructions: str) -> str:
     term_lines = "\n".join(f"- {t} → {zh}" for t, zh in terms.items()) or "（无）"
@@ -167,10 +213,7 @@ def build_write_prompt(clean_text: str, context: Dict[str, Any], canonical_names
 1. 忠于原意，不遗漏任何核心观点、细节和说话人的语气，但禁止逐字直译，要符合中文行文习惯。
 2. CS2 专业术语使用中国大陆电竞社区的惯用说法，优先遵循下方术语表。
 3. 选手名、教练名、战队名一律保留英文，并且必须与【规范名表】的写法完全一致（大小写、数字、符号都不能改），例如 m0NESY、ZywOo，不要音译成中文。
-4. 输出格式严格如下，不要使用任何 markdown 符号，不要标题、导语或注释：
-Q：<主持人问题，一段>
-A：<选手回答，一段>
-每个 Q 与 A 之间空一行。回答很长时可以按意群拆成多段，后续段落不加前缀。
+4. {write_format(clean_text)}
 5. 原稿中 [?] 标记的内容如果无法从上下文推断，在译文对应位置保留 [?]，方便人工核对。
 
 【规范名表（来自 HLTV）】
@@ -267,7 +310,8 @@ List every live interview in the transcript, in time order. Answer with JSON:
 
 Rules:
 - "start" is the line where the interviewer starts (greeting or first question).
-- One interview per interviewee: when the interviewer finishes with one player and starts with another (e.g. "thanks, and now I'm joined by X"), that is a new interview starting at that line. Several players answering together in the same conversation are one interview with several interviewees.
+- One interview per continuous conversation, not per player. When the same interview goes on to the next player without other content in between (e.g. "and now I'm joined by X", "what about you, Y?", a winning team answering one by one on stage), it is still the same interview: list all of them as its interviewees, in the order they answer. Start a new interview only when other content (casters, analysts, ads, a ceremony, replays) comes in between, or a different interviewer starts a separate interview.
+- A change of camera angle, the crowd cheering or a short pause does not end an interview.
 - Set "ended" true only if the transcript clearly continues with other content after the interview (casters, analysts, ads, the next segment, or the next interview). If the transcript ends while the interview may still be going, set "ended" false. "end" is the last line of the interview.
 - Set "live" false for pre-recorded or edited features and for clips played from earlier; they are still listed so they are not mistaken for live interviews.
 - If there is no interview, return {{"interviews": []}}."""
@@ -401,6 +445,9 @@ def build_package_prompt(facts: Dict[str, Any], draft: str, title_examples: List
 2. 决赛、季军赛写「今日正式落下帷幕」，其他比赛写「今日继续」。
 3. {host_line}
 4. 队名、选手名保留英文，和比赛事实、稿件的写法一致。{summary_rule}
+
+【多人采访】稿件里的回答以不同的选手名开头（如「xertioN：」「Spinx：」）时，是同一场采访里问了好几个人：
+标题写「战队名{label}：核心观点」（核心观点仍是某一位选手的原话）；摘要写「……；比赛结束后，X、Y、Z接受了主持人的采访，……」，按出场顺序列出受访者；JSON 里 interviewee 填说得最多的那位。
 
 【输出】只输出一个 JSON 对象：
 {{"interviewee": "受访选手（稿件里的写法）", "interviewee_team": "受访选手所在战队", "host": "主持人或 null", "event_zh": "赛事中文名", "titles": ["…", "…", "…", "…"], "summary": "…"}}

@@ -49,6 +49,9 @@ SCAN_LEAD = 120
 IDLE_CHECKS = 2
 # 两段采访的起点相差多少秒以内算同一段
 SAME_START = 60
+# 前一段结束到后一段开始不超过多少秒（中间没有别的内容）就算同一场采访：冠军采访、赛后连着问好几个人，
+# 主持人换人提问也是一篇稿子，不拆开
+MERGE_GAP = 30
 # 多久清理一次旧录音
 PRUNE_INTERVAL = 600
 # 没有开播信息时（探测出错）也试着录：最多每隔多久试一次
@@ -141,7 +144,26 @@ def parse_interviews(answer: Dict[str, Any], lines: List[Dict[str, Any]]) -> Lis
             "live": item.get("live") is not False,
             "note": str(item.get("note") or ""),
         })
-    return sorted(result, key=lambda item: item["start"])
+    return merge_adjacent(sorted(result, key=lambda item: item["start"]))
+
+
+def merge_adjacent(interviews: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    首尾相接（间隔不超过 MERGE_GAP 秒）的现场采访合成一段，受访者按出场顺序合并。
+    实测 IEM 北京决赛后的冠军采访：主持人挨个问 Spinx、xertioN、xelex……按人拆成了 5 个任务。
+    """
+    result: List[Dict[str, Any]] = []
+    for item in interviews:
+        prev = result[-1] if result else None
+        if (prev and prev["live"] and item["live"] and prev["end"] is not None
+                and item["start"] - prev["end"] <= MERGE_GAP):
+            names = prev["interviewees"] + [n for n in item["interviewees"]
+                                            if n.lower() not in {m.lower() for m in prev["interviewees"]}]
+            prev.update(end=item["end"], ended=item["ended"], interviewees=names, team=prev["team"] or item["team"],
+                        note="; ".join(n for n in (prev["note"], item["note"]) if n))
+        else:
+            result.append(dict(item))
+    return result
 
 
 def step_detection(det: Dict[str, Any], interviews: List[Dict[str, Any]], runs: List[Dict[str, Any]],
@@ -198,11 +220,13 @@ def step_detection(det: Dict[str, Any], interviews: List[Dict[str, Any]], runs: 
     run = None if split else matching_run(runs, start)
     if run and (run["open"] or (ended and run["end"] > end + SHOT_END_AFTER)):
         ended = confirmed = False
-    by_camera = bool(run and not run["open"] and not confirmed and run["end"] > start)
+    # 镜头切走只能省掉第二次确认，不能单独决定结束：采访中途切机位、切到观众，镜头段就断了，
+    # 实测冠军采访因此在受访者说到一半时被截断。转写还认为在继续时，等转写（或超时）
+    by_camera = bool(run and not run["open"] and not confirmed and ended and run["end"] > start)
 
     if confirmed or by_camera:
         if by_camera:
-            start, end = max(floor, min(start, run["start"])), run["end"]
+            start, end = max(floor, min(start, run["start"])), max(end, run["end"])
         captures.append({"start": start, "end": end, "source": "auto" if confirmed else "camera",
                          "interviewees": active.get("interviewees") or [], "team": active.get("team")})
         det.update(floor=end, seen_until=end, active=None, recheck=True,
