@@ -3,7 +3,7 @@ Whisper语音识别服务 - 使用faster-whisper进行GPU加速转录
 """
 import logging
 from typing import Any, Callable, Dict, Optional
-from faster_whisper import WhisperModel, BatchedInferencePipeline
+from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +43,13 @@ class WhisperService:
             return
         logger.info("加载 Whisper 模型: %s (%s, %s)", self.model_name, self.device, self.compute_type)
         try:
-            base_model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type)
+            self.model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type)
         except Exception as error:
             if self.device == "cpu":
                 raise
             logger.warning("CUDA 加载失败，退回 CPU: %s", error)
             self.device, self.compute_type = "cpu", "int8"
-            base_model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
-        self.model = BatchedInferencePipeline(model=base_model)
+            self.model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
         logger.info("Whisper 模型加载完成")
 
     def transcribe(
@@ -99,6 +98,8 @@ class WhisperService:
                 "segment_count": 0,
             })
 
+        # 不用 BatchedInferencePipeline：它按 30 秒一窗整段解码、不带时间戳，嗓音小或口音重的受访者
+        # 整句会被漏掉（Techno 那场漏了一半回答）。逐段解码慢一倍左右（2 分钟采访约 10 秒），但不丢句子
         segments, info = self.model.transcribe(
             audio_path,
             language=language,
@@ -108,8 +109,6 @@ class WhisperService:
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=500),
             condition_on_previous_text=False,
-            # 8GB 显存上还要放说话人分离模型和桌面程序，批次太大会挤到共享内存里，慢几倍
-            batch_size=8,
         )
 
         total_duration = info.duration or 0
