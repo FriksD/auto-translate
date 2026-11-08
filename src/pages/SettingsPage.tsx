@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardTitle, Checkbox, ErrorText, Field, Select } from '@/components/ui/form'
 import { ProviderList, SecretInput } from '@/components/settings/ProviderList'
-import { api, LlmStep, Settings } from '@/lib/api'
+import { api, LlmEffort, LlmStep, Settings } from '@/lib/api'
 
 function StepPicker({
   label,
@@ -22,7 +22,7 @@ function StepPicker({
 }) {
   const provider = settings.llm.providers.find((p) => p.id === step.provider_id)
   return (
-    <div className="grid gap-3 md:grid-cols-2">
+    <div className="grid gap-3 md:grid-cols-[1fr_1fr_180px]">
       <Field label={label} hint={hint}>
         <Select value={step.provider_id} onChange={(e) => onChange({ ...step, provider_id: e.target.value })}>
           <option value="">（未选择）</option>
@@ -39,6 +39,15 @@ function StepPicker({
           placeholder={provider?.model || ''}
           onChange={(e) => onChange({ ...step, model: e.target.value })}
         />
+      </Field>
+      <Field label="思考强度" hint="默认 = 不传参数，由模型自己决定">
+        <Select value={step.effort} onChange={(e) => onChange({ ...step, effort: e.target.value as LlmEffort })}>
+          <option value="">默认</option>
+          <option value="off">关闭</option>
+          <option value="low">低</option>
+          <option value="medium">中</option>
+          <option value="high">高</option>
+        </Select>
       </Field>
     </div>
   )

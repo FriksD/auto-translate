@@ -50,10 +50,11 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "llm": {
         # 每项：{id, name, protocol: "openai"|"anthropic"|"gemini", base_url, api_key, model, use_proxy}
         "providers": [],
-        "clean": {"provider_id": "", "model": ""},
-        "write": {"provider_id": "", "model": ""},
+        # effort：思考强度，""=模型默认，off/low/medium/high（换算成各协议的参数，见 llm.py）
+        "clean": {"provider_id": "", "model": "", "effort": ""},
+        "write": {"provider_id": "", "model": "", "effort": ""},
         # 直播采访定位：每 30 秒调用一次，选响应快的模型；不选则用 clean 的设置
-        "detect": {"provider_id": "", "model": ""},
+        "detect": {"provider_id": "", "model": "", "effort": ""},
         "temperature": 0.3,
         "extra_instructions": "",
     },

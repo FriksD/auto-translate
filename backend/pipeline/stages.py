@@ -346,6 +346,7 @@ def _llm_call(settings: Dict[str, Any], step: str, system: str, user: str,
         temperature=float(settings["llm"].get("temperature", 0.3)),
         proxy=config.proxy_or_none(settings),
         images=images,
+        effort=step_cfg.get("effort", ""),
     )
 
 

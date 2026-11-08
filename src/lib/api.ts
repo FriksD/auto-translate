@@ -267,9 +267,12 @@ export interface LlmProvider {
   use_proxy: boolean
 }
 
+export type LlmEffort = '' | 'off' | 'low' | 'medium' | 'high'
+
 export interface LlmStep {
   provider_id: string
   model: string
+  effort: LlmEffort
 }
 
 export interface Settings {
